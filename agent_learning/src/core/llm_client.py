@@ -24,6 +24,8 @@ class LLMClient:
                 item["name"] = msg.name
             if msg.tool_call_id:
                 item["tool_call_id"] = msg.tool_call_id
+            if msg.tool_calls:
+                item["tool_calls"] = msg.tool_calls
             payload.append(item)
         return payload
 
