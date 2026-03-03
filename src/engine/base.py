@@ -5,6 +5,14 @@ from ..config import MODEL_CONFIG
 
 
 class LLMGateway:
+    """
+    Agent 使用的统一 LLM 网关。
+
+    职责：
+    - 根据 provider 选择具体模型配置（base_url / api_key / model）。
+    - 对上层提供统一的 chat(messages, tools) 接口。
+    """
+
     def __init__(self, provider: str = "deepseek"):
         target = MODEL_CONFIG[provider]
         self.client = OpenAI(api_key=target["api_key"], base_url=target["base_url"])
@@ -22,8 +30,4 @@ class LLMGateway:
             tools=tools,
             tool_choice="auto" if tools else None,
         )
-
-
-class AgentEngine(LLMGateway):
-    """向后兼容旧命名。"""
 

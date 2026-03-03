@@ -14,7 +14,7 @@ MODEL_CONFIG = {
 DEFAULT_PROVIDER = "deepseek"
 
 AGENT_CONFIG = {
-    "max_iterations": 6,
+    "max_iterations": 10,
     "enable_planner": True,
     "memory_backend": "file",
     "memory_file_path": ".jarvis/memory.json",

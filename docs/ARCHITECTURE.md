@@ -143,10 +143,47 @@ sequenceDiagram
     A-->>M: content
     M-->>U: 输出回答
 ```
+---
+## 5. 设计理念与分层优势
 
+### 5.1 `AgentApp`：应用壳与组装器
+
+- **职责**：集中负责依赖注入和应用装配，把 `AgentEngine` / `Planner` / `MemoryService` / `AgentOrchestrator` 等组件组合在一起，对外只暴露简单的 `chat(user_input)` 接口。
+- **优势**：
+  - 把「应用形态」（命令行、HTTP 服务等）与「Agent 内部逻辑」解耦。
+  - 更容易在不同运行方式之间切换，只需更换入口，不必修改 Agent 内核。
+
+### 5.2 Agent 编排层：专注“如何用 LLM + 工具解决问题”
+
+- **职责**：`AgentOrchestrator` + `AgentSession` + `Planner` + `MemoryService` 一起，负责：
+  - 如何组织多轮对话。
+  - 何时调用工具、如何处理 tool_calls。
+  - 何时读取/写入长期记忆。
+- **优势**：
+  - 高内聚：只关心智能流程本身，不关心底层 API/网络细节。
+  - 易演进：将来加多 Agent 协作、更复杂的规划与记忆策略，只需扩展这一层。
+  - 易测试：可以通过 fake 的 `AgentEngine/LLMGateway` 来单测 Orchestrator 的流程逻辑。
+
+### 5.3 `AgentEngine` / `LLMGateway`：屏蔽 LLM 提供商差异
+
+- **职责**：统一承担与底层 LLM 服务通信的细节：
+  - 选用哪个 provider（deepseek / gemini 等）。
+  - 使用什么 base_url / api_key / model 名。
+  - 调用哪个 SDK、如何传递 `messages` 和 `tools`。
+- **优势**：
+  - 上层只需调用 `chat(messages, tools)`，像调用普通函数一样使用 LLM。
+  - 更换模型提供商或接入本地模型时，只需要更改配置或替换 Gateway 实现。
+  - 便于横切能力（重试、超时、日志、成本统计）集中在一处实现，而不污染 Agent 代码。
+  - **特别适合 mock 测试**：在测试环境中可以注入一个假的 Engine，只返回预设的 `message/tool_calls`，无需真正访问网络，就能验证 Agent 的决策与流程。
+
+整体协作可以概括为：
+
+- `AgentApp` 负责“把部件装好，提供一个统一入口”；
+- Agent 编排层负责“拿到用户输入后，如何合理地使用 LLM 与工具”；
+- `AgentEngine` / `LLMGateway` 负责“具体怎么跟某个 LLM 服务打交道”。
 ---
 
-## 5. 扩展建议
+## 6. 扩展建议
 
 - 新增工具：在 `src/tools/builtin/` 添加模块并注册，无需改 Orchestrator 主循环。
 - 替换记忆后端：实现新的 `BaseMemoryStore`（如 SQLite/Redis）后注入 `MemoryService`。
@@ -155,7 +192,7 @@ sequenceDiagram
 
 ---
 
-## 6. 与学习文档关系
+## 7. 与学习文档关系
 
 - `docs/TEACHING_PLAN.md`：学习路径与阶段目标。
 - 本文档：当前代码真实架构快照。

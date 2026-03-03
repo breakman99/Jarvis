@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..config import AGENT_CONFIG, DEFAULT_PROVIDER
-from ..engine import AgentEngine
+from ..engine import LLMGateway
 from ..tools import tool_executor, tool_registry
 from .memory import FileMemoryStore, MemoryService
 from .orchestrator import AgentOrchestrator, AgentOrchestratorConfig
@@ -23,7 +23,7 @@ class AgentApp:
     def __init__(self, config: AgentAppConfig | None = None):
         self.config = config or AgentAppConfig()
 
-        engine = AgentEngine(provider=self.config.provider)
+        engine = LLMGateway(provider=self.config.provider)
         planner = Planner(enabled=self.config.enable_planner)
         orchestrator_config = AgentOrchestratorConfig(max_iterations=self.config.max_iterations)
         memory_service = None

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from ..engine import AgentEngine
+from ..engine import LLMGateway
 from ..tools import ToolContext, ToolExecutor, ToolRegistry
 from .memory import MemoryService
 from .planner import Planner
@@ -24,7 +24,7 @@ class AgentOrchestrator:
     def __init__(
         self,
         *,
-        engine: AgentEngine,
+        engine: LLMGateway,
         tool_registry: ToolRegistry,
         tool_executor: ToolExecutor,
         config: Optional[AgentOrchestratorConfig] = None,
