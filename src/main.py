@@ -1,18 +1,28 @@
-from .agent import SimpleAgent
-from .engine import AgentEngine
+from .agent import AgentApp, AgentAppConfig
 
 
 def main():
-    # 初始化
-    engine = AgentEngine(provider="deepseek")
-    agent = SimpleAgent(engine)
+    app = AgentApp(config=AgentAppConfig())
 
-    # 测试带有计算和时间的问题
-    prompt = "你好，请问现在几点了？顺便帮我算一下 123.45 加 678.9 等于多少。然后向我问好"
-    print(f"🚀 用户: {prompt}\n")
+    print("🚀 Jarvis Agent 已启动，进入交互模式。")
+    print("提示：输入内容后回车与 Agent 对话，输入 exit/quit/q 退出。\n")
 
-    result = agent.run(prompt)
-    print(f"\n🤖 Agent: {result}")
+    while True:
+        try:
+            user_input = input("🧑 用户> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n👋 再见！")
+            break
+
+        if not user_input:
+            continue
+
+        if user_input.lower() in {"exit", "quit", "q"}:
+            print("👋 再见！")
+            break
+
+        result = app.chat(user_input)
+        print(f"🤖 Agent> {result}\n")
 
 
 if __name__ == "__main__":

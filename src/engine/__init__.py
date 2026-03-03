@@ -1,4 +1,4 @@
-from .base import AgentEngine
+from .base import AgentEngine, LLMGateway
 
-__all__ = ["AgentEngine"]
+__all__ = ["AgentEngine", "LLMGateway"]
 
