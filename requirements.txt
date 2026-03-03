@@ -1,0 +1,23 @@
+# Python Agent 项目依赖
+# 基础依赖
+python-dotenv>=1.0.0
+
+# 如果需要使用 OpenAI API
+openai>=1.0.0
+
+# 如果需要使用其他 LLM API
+anthropic>=0.18.0
+
+# 工具库
+requests>=2.31.0
+matplotlib>=3.9.0
+
+# 日志（可选）
+colorlog>=6.8.0
+
+# google gemini
+google-genai>=1.8.0
+
+# search on the web
+requests>=2.31.0
+
