@@ -42,7 +42,7 @@ flowchart TD
   - 命令行 REPL：读取用户输入、调用 `AgentApp.chat()`、打印输出。
 - `src/agent/app.py`
   - `AgentApp` 负责依赖注入：
-    - 创建 `AgentEngine` / `Planner` / `MemoryService` / `AgentOrchestrator`
+    - 创建 `LLMGateway` / `Planner` / `MemoryService` / `AgentOrchestrator`
   - `AgentAppConfig` 统一控制 provider、planner 开关、迭代上限、memory 后端等。
 
 ### 3.2 Agent 编排层
@@ -92,8 +92,7 @@ flowchart TD
 ### 3.4 LLM 网关层
 
 - `src/engine/base.py`
-  - `LLMGateway`：统一 LLM 调用入口，屏蔽 provider 差异。
-  - `AgentEngine`：旧命名兼容，继承自 `LLMGateway`。
+  - `LLMGateway`：唯一 LLM 调用入口，屏蔽 provider 差异。
 
 ### 3.5 配置层
 
@@ -148,7 +147,7 @@ sequenceDiagram
 
 ### 5.1 `AgentApp`：应用壳与组装器
 
-- **职责**：集中负责依赖注入和应用装配，把 `AgentEngine` / `Planner` / `MemoryService` / `AgentOrchestrator` 等组件组合在一起，对外只暴露简单的 `chat(user_input)` 接口。
+- **职责**：集中负责依赖注入和应用装配，把 `LLMGateway` / `Planner` / `MemoryService` / `AgentOrchestrator` 等组件组合在一起，对外只暴露简单的 `chat(user_input)` 接口。
 - **优势**：
   - 把「应用形态」（命令行、HTTP 服务等）与「Agent 内部逻辑」解耦。
   - 更容易在不同运行方式之间切换，只需更换入口，不必修改 Agent 内核。
@@ -162,9 +161,9 @@ sequenceDiagram
 - **优势**：
   - 高内聚：只关心智能流程本身，不关心底层 API/网络细节。
   - 易演进：将来加多 Agent 协作、更复杂的规划与记忆策略，只需扩展这一层。
-  - 易测试：可以通过 fake 的 `AgentEngine/LLMGateway` 来单测 Orchestrator 的流程逻辑。
+  - 易测试：可以通过 fake 的 `LLMGateway` 来单测 Orchestrator 的流程逻辑。
 
-### 5.3 `AgentEngine` / `LLMGateway`：屏蔽 LLM 提供商差异
+### 5.3 `LLMGateway`：屏蔽 LLM 提供商差异
 
 - **职责**：统一承担与底层 LLM 服务通信的细节：
   - 选用哪个 provider（deepseek / gemini 等）。
@@ -174,13 +173,13 @@ sequenceDiagram
   - 上层只需调用 `chat(messages, tools)`，像调用普通函数一样使用 LLM。
   - 更换模型提供商或接入本地模型时，只需要更改配置或替换 Gateway 实现。
   - 便于横切能力（重试、超时、日志、成本统计）集中在一处实现，而不污染 Agent 代码。
-  - **特别适合 mock 测试**：在测试环境中可以注入一个假的 Engine，只返回预设的 `message/tool_calls`，无需真正访问网络，就能验证 Agent 的决策与流程。
+  - **特别适合 mock 测试**：在测试环境中可以注入一个假的 Gateway，只返回预设的 `message/tool_calls`，无需真正访问网络，就能验证 Agent 的决策与流程。
 
 整体协作可以概括为：
 
 - `AgentApp` 负责“把部件装好，提供一个统一入口”；
 - Agent 编排层负责“拿到用户输入后，如何合理地使用 LLM 与工具”；
-- `AgentEngine` / `LLMGateway` 负责“具体怎么跟某个 LLM 服务打交道”。
+- `LLMGateway` 负责“具体怎么跟某个 LLM 服务打交道”。
 ---
 
 ## 6. 扩展建议
@@ -188,7 +187,7 @@ sequenceDiagram
 - 新增工具：在 `src/tools/builtin/` 添加模块并注册，无需改 Orchestrator 主循环。
 - 替换记忆后端：实现新的 `BaseMemoryStore`（如 SQLite/Redis）后注入 `MemoryService`。
 - 增强 Planner：把占位规划升级为真实“计划-执行-验证”链路。
-- 生产化：新增日志、追踪、重试策略与测试覆盖。
+- 生产化：日志与打点见 `docs/OBSERVABILITY.md`；可在此基础上增加追踪、重试与测试覆盖。
 
 ---
 

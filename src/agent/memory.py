@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
+import logging
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-import json
-import re
 from typing import Any, Dict
+
+logger = logging.getLogger(__name__)
 
 
 class BaseMemoryStore(ABC):
@@ -36,6 +39,14 @@ class FileMemoryStore(BaseMemoryStore):
 
 @dataclass
 class MemoryService:
+    """
+    长期记忆服务：从用户输入中提取结构化记忆并持久化，在对话启动时注入 system prompt。
+
+    设计意图：Orchestrator 在 run 开始时调用 observe_user_input 更新记忆，在构造
+    session 时通过 build_system_context 将已知记忆（如 user_name、preferred_language）
+    注入系统提示，使 LLM 能利用跨会话信息。协作：由 AgentApp 根据 memory_backend 构造
+    并注入 Orchestrator；存储由 BaseMemoryStore 抽象，当前实现为 FileMemoryStore。
+    """
     store: BaseMemoryStore
 
     def load_snapshot(self) -> Dict[str, Any]:
@@ -77,6 +88,12 @@ class MemoryService:
 
         if updated:
             self.store.save(snapshot)
+            changed = []
+            if any(re.search(p, user_input) for p in name_patterns):
+                changed.append("user_name")
+            if "请用中文" in user_input or "用中文回答" in user_input or "please answer in english" in user_input.lower():
+                changed.append("preferred_language")
+            logger.info("memory_updated fields=%s", changed)
 
         return snapshot
 

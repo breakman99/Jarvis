@@ -6,6 +6,14 @@ from .base import BaseTool, FunctionTool, ToolSpec
 
 
 class ToolRegistry:
+    """
+    工具注册中心：维护 name -> BaseTool 映射，并导出 OpenAI 风格 tools schema。
+
+    设计意图：Agent 只需从本注册表获取 to_openai_tools() 传给 LLM，新增工具只需
+    在此注册，无需改 Orchestrator。协作：ToolExecutor 通过 registry.get(name) 取
+    工具并执行；builtin 模块在导入时向全局 tool_registry 注册。
+    """
+
     def __init__(self):
         self._tools: Dict[str, BaseTool] = {}
 
