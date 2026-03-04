@@ -6,6 +6,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.agent.orchestrator import AgentOrchestrator, AgentOrchestratorConfig  # noqa: E402
+from src.agent.session import AgentSession  # noqa: E402
+from src.agent.coordinator import PlanningAgent  # noqa: E402
 from src.engine import LLMReply, LLMToolCall  # noqa: E402
 from src.tools.context import RequestContext  # noqa: E402
 from src.tools.executor import ToolExecutor  # noqa: E402
@@ -83,4 +85,69 @@ def test_orchestrator_returns_trace_fields_in_metadata():
     assert response.content == "done"
     assert response.metadata.get("request_id")
     assert response.metadata.get("trace_id")
+
+
+class _AlwaysToolCallEngine:
+    def chat(self, messages, tools=None, context=None):  # noqa: ANN001, ANN201
+        _ = messages, tools, context
+        if not tools:
+            return LLMReply(content="finalized after failures", tool_calls=[])
+        return LLMReply(
+            content="",
+            tool_calls=[LLMToolCall(id="c1", name="fail_once_non_idem", arguments="{}")],
+        )
+
+
+def test_orchestrator_should_stop_on_consecutive_tool_failures():
+    registry = ToolRegistry()
+    def always_fail() -> str:
+        raise RuntimeError("forced failure")
+
+    registry.register_function(
+        name="fail_once_non_idem",
+        description="always fail",
+        parameters={"type": "object", "properties": {}},
+        idempotent=False,
+        func=always_fail,
+    )
+    executor = ToolExecutor(registry)
+    orchestrator = AgentOrchestrator(
+        engine=_AlwaysToolCallEngine(),
+        tool_registry=registry,
+        tool_executor=executor,
+        config=AgentOrchestratorConfig(
+            max_iterations=10,
+            max_consecutive_tool_failures=2,
+        ),
+    )
+
+    response = orchestrator.run("hello", context=RequestContext.create())
+    assert response.metadata.get("reason") == "consecutive_tool_failures_finalized"
+    assert response.content == "finalized after failures"
+
+
+class _CaptureMessagesEngine:
+    def __init__(self) -> None:
+        self.last_messages = []
+
+    def chat(self, messages, tools=None, context=None):  # noqa: ANN001, ANN201
+        _ = tools, context
+        self.last_messages = messages
+        return LLMReply(content="step1\nstep2", tool_calls=[])
+
+
+def test_planning_agent_should_include_full_history():
+    engine = _CaptureMessagesEngine()
+    planner = PlanningAgent(engine=engine)
+    session = AgentSession(system_prompt="你是助手")
+    session.append_user("第一个问题")
+    session.append_assistant("第一个回答")
+    steps = planner.plan("继续第二个问题", session, context=RequestContext.create())
+
+    assert steps == ["step1", "step2"]
+    assert len(engine.last_messages) == 2
+    user_prompt = engine.last_messages[1]["content"]
+    assert "第一个问题" in user_prompt
+    assert "第一个回答" in user_prompt
+    assert "继续第二个问题" in user_prompt
 

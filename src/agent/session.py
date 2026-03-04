@@ -68,3 +68,13 @@ class AgentSession:
         """追加一条 role=tool 的消息（工具执行结果）。"""
         self.messages.append(message)
 
+    def trim(self, *, max_messages: int) -> None:
+        """
+        裁剪会话消息数量，保留首条 system 消息与末尾若干条消息。
+        """
+        if max_messages <= 1 or len(self.messages) <= max_messages:
+            return
+        system = self.messages[0]
+        tail_keep = max_messages - 1
+        self.messages = [system] + self.messages[-tail_keep:]
+

@@ -46,6 +46,18 @@ class FakeLLMWithAddNumbers:
         return LLMReply(content="3", tool_calls=[])
 
 
+class FakeLLMCountUserMessages:
+    """返回当前 messages 中 user 消息数量，用于验证会话历史是否保留。"""
+
+    def __init__(self, provider: str = "deepseek") -> None:  # noqa: ARG002
+        pass
+
+    def chat(self, messages, tools=None, context=None):  # noqa: ANN001, ANN201
+        _ = tools, context
+        user_count = sum(1 for m in messages if m.get("role") == "user")
+        return LLMReply(content=f"user_count={user_count}", tool_calls=[])
+
+
 def test_agent_app_simple_answer(monkeypatch: pytest.MonkeyPatch) -> None:
     """验证 AgentApp 通过 LLM 直接给出答案的完整链路。"""
 
@@ -68,4 +80,17 @@ def test_agent_app_with_tool_call(monkeypatch: pytest.MonkeyPatch) -> None:
     reply = app.chat("请帮我计算 1 加 2 等于多少？")
 
     assert "3" in reply
+
+
+def test_agent_app_should_keep_session_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(agent_app_module, "LLMGateway", FakeLLMCountUserMessages)
+
+    app = agent_app_module.AgentApp(
+        AgentAppConfig(enable_planning=False)
+    )
+    first = app.chat("第一句")
+    second = app.chat("第二句")
+
+    assert "user_count=1" in first
+    assert "user_count=2" in second
 

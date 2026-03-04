@@ -7,29 +7,15 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+from dotenv import load_dotenv
+
+# 自动加载项目根目录 .env（若存在）
+load_dotenv()
 
 def _get_env(key: str, default: str = "") -> str:
     """从环境变量读取并去除首尾空白，空则返回 default。"""
     return os.environ.get(key, default).strip() or default
 
-
-# ---------- 模型配置 ----------
-# api_key 优先从环境变量读取，避免提交到版本库
-MODEL_CONFIG: dict[str, dict[str, Any]] = {
-    "deepseek": {
-        "base_url": os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
-        "api_key": _get_env("DEEPSEEK_API_KEY"),
-        "model": os.environ.get("DEEPSEEK_MODEL", "deepseek-chat"),
-    },
-    "gemini": {
-        "base_url": os.environ.get(
-            "GEMINI_BASE_URL",
-            "https://generativelanguage.googleapis.com/v1beta/openai/",
-        ),
-        "api_key": _get_env("GEMINI_API_KEY"),
-        "model": os.environ.get("GEMINI_MODEL", "gemini-2.0-flash"),
-    },
-}
 
 DEFAULT_PROVIDER = os.environ.get("JARVIS_DEFAULT_PROVIDER", "deepseek")
 
@@ -44,6 +30,12 @@ LLM_CONFIG = {
 # ---------- Agent 与记忆 ----------
 AGENT_CONFIG = {
     "max_iterations": int(os.environ.get("JARVIS_MAX_ITERATIONS", "10")),
+    "max_consecutive_tool_failures": int(
+        os.environ.get("JARVIS_MAX_CONSECUTIVE_TOOL_FAILURES", "3")
+    ),
+    "enable_session_trim": os.environ.get("JARVIS_ENABLE_SESSION_TRIM", "false").lower()
+    in ("true", "1", "yes"),
+    "max_session_messages": int(os.environ.get("JARVIS_MAX_SESSION_MESSAGES", "80")),
     "enable_planning": os.environ.get(
         "JARVIS_ENABLE_PLANNING",
         os.environ.get("JARVIS_ENABLE_PLANNER", "true"),
@@ -74,23 +66,79 @@ def load_settings() -> AppSettings:
     """加载当前环境下的全部配置为 AppSettings。"""
     return AppSettings(
         default_provider=DEFAULT_PROVIDER,
-        model_config=MODEL_CONFIG,
+        model_config=load_model_config(),
         llm_config=LLM_CONFIG,
         agent_config=AGENT_CONFIG,
         tool_config=TOOL_CONFIG,
     )
 
 
+def _provider_env_prefix(provider: str) -> str:
+    return provider.upper().replace("-", "_")
+
+
+def load_model_config() -> dict[str, dict[str, Any]]:
+    """
+    从 .env / 环境变量动态构建模型配置。
+    通过 JARVIS_PROVIDERS 指定 provider 列表，例如：deepseek,gemini。
+    每个 provider 读取：
+      - <PROVIDER>_BASE_URL
+      - <PROVIDER>_API_KEY
+      - <PROVIDER>_MODEL
+    """
+    providers_env = _get_env("JARVIS_PROVIDERS", "deepseek,gemini")
+    providers = [p.strip() for p in providers_env.split(",") if p.strip()]
+    out: dict[str, dict[str, Any]] = {}
+    for provider in providers:
+        prefix = _provider_env_prefix(provider)
+        out[provider] = {
+            "base_url": _get_env(f"{prefix}_BASE_URL"),
+            "api_key": _get_env(f"{prefix}_API_KEY"),
+            "model": _get_env(f"{prefix}_MODEL"),
+        }
+    return out
+
+
+def get_provider_model_config(provider: str) -> dict[str, Any]:
+    cfg = load_model_config()
+    if provider not in cfg:
+        raise ValueError(f"未知 provider: {provider}，可选: {list(cfg.keys())}")
+    return cfg[provider]
+
+
+def collect_settings_errors() -> list[str]:
+    """收集配置错误，返回错误列表（空列表表示配置合法）。"""
+    settings = load_settings()
+    errors: list[str] = []
+    if not settings.model_config:
+        errors.append("JARVIS_PROVIDERS 不能为空，至少配置一个 provider")
+        return errors
+
+    if settings.default_provider not in settings.model_config:
+        errors.append(f"JARVIS_DEFAULT_PROVIDER={settings.default_provider} 不在 JARVIS_PROVIDERS 中")
+    for provider, provider_cfg in settings.model_config.items():
+        provider_key = provider.upper().replace("-", "_")
+        if not provider_cfg.get("base_url"):
+            errors.append(f"{provider_key}_BASE_URL 不能为空")
+        if not provider_cfg.get("model"):
+            errors.append(f"{provider_key}_MODEL 不能为空")
+
+    if settings.llm_config["max_retries"] < 0:
+        errors.append("JARVIS_LLM_MAX_RETRIES 不能小于 0")
+    if settings.agent_config["max_iterations"] <= 0:
+        errors.append("JARVIS_MAX_ITERATIONS 必须大于 0")
+    if settings.agent_config["max_consecutive_tool_failures"] <= 0:
+        errors.append("JARVIS_MAX_CONSECUTIVE_TOOL_FAILURES 必须大于 0")
+    if settings.agent_config["max_session_messages"] <= 1:
+        errors.append("JARVIS_MAX_SESSION_MESSAGES 必须大于 1")
+    if settings.tool_config["max_retries"] < 0:
+        errors.append("JARVIS_TOOL_MAX_RETRIES 不能小于 0")
+    return errors
+
+
 def validate_settings() -> None:
     """校验 provider、重试与迭代等配置合法性；不通过时抛出 ValueError。"""
-    settings = load_settings()
-    if settings.default_provider not in settings.model_config:
-        raise ValueError(
-            f"JARVIS_DEFAULT_PROVIDER={settings.default_provider} 不在 MODEL_CONFIG 中"
-        )
-    if settings.llm_config["max_retries"] < 0:
-        raise ValueError("JARVIS_LLM_MAX_RETRIES 不能小于 0")
-    if settings.agent_config["max_iterations"] <= 0:
-        raise ValueError("JARVIS_MAX_ITERATIONS 必须大于 0")
-    if settings.tool_config["max_retries"] < 0:
-        raise ValueError("JARVIS_TOOL_MAX_RETRIES 不能小于 0")
+    errors = collect_settings_errors()
+    if errors:
+        details = "\n".join(f"- {item}" for item in errors)
+        raise ValueError(f"配置校验失败，共 {len(errors)} 项：\n{details}")

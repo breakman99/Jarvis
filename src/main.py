@@ -5,7 +5,6 @@ CLI REPL 入口。
 对异常做友好提示并保持 REPL 不退出。日志格式与级别在此统一配置。
 """
 import logging
-import traceback
 
 from .agent import AgentApp, AgentAppConfig
 
@@ -27,7 +26,7 @@ def main() -> None:
 
     while True:
         try:
-            user_input = input("🧑 用户> ").strip()
+            user_input = input("\n🧑 用户> ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\n👋 再见！")
             break
@@ -36,7 +35,7 @@ def main() -> None:
             continue
 
         if user_input.lower() in {"exit", "quit", "q"}:
-            print("👋 再见！")
+            print("\n👋 再见！")
             break
 
         input_summary = user_input[:80] + "..." if len(user_input) > 80 else user_input
@@ -45,12 +44,11 @@ def main() -> None:
             result = app.chat(user_input)
         except Exception as exc:
             logger.exception("session=cli chat_failed error=%s", exc)
-            traceback.print_exc()
-            print("🤖 Agent> 当前服务出现异常，请稍后重试。若持续出现请查看日志。\n")
+            print("\n🤖 Agent> 当前服务出现异常，请稍后重试。若持续出现请查看日志。\n")
             continue
         reply_summary = (result[:80] + "...") if len(result) > 80 else result
         logger.info("session=cli reply_len=%s reply_summary=%s", len(result), reply_summary)
-        print(f"🤖 Agent> {result}\n")
+        print(f"\n🤖 Agent> {result}\n")
 
 
 if __name__ == "__main__":

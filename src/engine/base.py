@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 from openai import OpenAI
 
 from ..common import CancelledError, TimeoutError, TransientError
-from ..config import LLM_CONFIG, MODEL_CONFIG
+from ..config import LLM_CONFIG, get_provider_model_config, load_model_config
 from ..observability import metrics
 from ..tools.context import RequestContext
 from .types import LLMReply, LLMToolCall
@@ -49,13 +49,14 @@ class LLMGateway:
     """
 
     def __init__(self, provider: str = "deepseek"):
-        if provider not in MODEL_CONFIG:
-            raise ValueError(f"未知 provider: {provider}，可选: {list(MODEL_CONFIG.keys())}")
+        model_config = load_model_config()
+        if provider not in model_config:
+            raise ValueError(f"未知 provider: {provider}，可选: {list(model_config.keys())}")
         self._provider = provider
-        target = MODEL_CONFIG[provider]
+        target = get_provider_model_config(provider)
         api_key = target.get("api_key") or ""
         base_url = target.get("base_url") or ""
-        if not api_key and "OPENAI_API_KEY" not in str(target):
+        if not api_key:
             logger.warning(
                 "llm_gateway provider=%s api_key 未设置，请配置环境变量（如 DEEPSEEK_API_KEY）",
                 provider,
@@ -90,7 +91,7 @@ class LLMGateway:
                     messages=messages,
                     tools=tools,
                     tool_choice="auto" if tools else None,
-                    request_timeout=float(self._timeout_seconds),
+                    timeout=float(self._timeout_seconds),
                 )
                 latency_ms = (time.perf_counter() - start) * 1000
                 logger.info(

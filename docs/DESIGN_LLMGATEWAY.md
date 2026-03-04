@@ -18,13 +18,13 @@
 | 组件 | 文件 | 职责 |
 |------|------|------|
 | LLMGateway | `src/engine/base.py` | 构造 OpenAI 兼容 client；chat() 带重试与超时 |
-| 配置 | `src/config.py` | MODEL_CONFIG、DEFAULT_PROVIDER；LLM 重试/超时参数 |
+| 配置 | `src/config.py` | `.env` 动态 provider 配置（`JARVIS_PROVIDERS` + `<PROVIDER>_*`）与 LLM 重试/超时参数 |
 
 ---
 
 ## 3. LLMGateway 接口与行为
 
-- **构造**：`LLMGateway(provider: str)`；从 MODEL_CONFIG 取 base_url、api_key、model；构造 OpenAI(api_key=..., base_url=...) 的 client。provider 不在配置中时应有明确错误或 fallback。
+- **构造**：`LLMGateway(provider: str)`；从 `.env` 动态加载的 provider 配置中读取 base_url、api_key、model；构造 OpenAI(api_key=..., base_url=...) 的 client。provider 不在 `JARVIS_PROVIDERS` 中时抛出明确错误。
 - **chat(messages, tools?, context?)**：
   - 使用配置的 timeout、max_retries、backoff 等。
   - 可重试：连接失败、超时、5xx、限流（429）等；退避采用指数+抖动。
@@ -38,6 +38,11 @@
 
 - LLM_MAX_RETRIES、LLM_BASE_BACKOFF_MS、LLM_MAX_BACKOFF_MS、LLM_TIMEOUT_SECONDS。
 - API Key 等敏感项从环境变量或安全配置读取，不写死在仓库。
+- provider 配置建议：
+  - `JARVIS_PROVIDERS=deepseek,gemini`
+  - `JARVIS_DEFAULT_PROVIDER=deepseek`
+  - `DEEPSEEK_BASE_URL / DEEPSEEK_API_KEY / DEEPSEEK_MODEL`
+  - `GEMINI_BASE_URL / GEMINI_API_KEY / GEMINI_MODEL`
 
 ---
 
@@ -57,5 +62,5 @@
 
 ## 7. 扩展与测试
 
-- 新增 provider：在 MODEL_CONFIG 增加条目；或通过工厂/注册表按 provider 名创建 Gateway。
+- 新增 provider：修改 `.env` 的 `JARVIS_PROVIDERS` 并补齐 `<PROVIDER>_BASE_URL / _API_KEY / _MODEL` 即可。
 - 测试：fake LLMGateway 实现 chat() 返回预设 Completion，用于 Orchestrator/Coordinator 单测。

@@ -61,13 +61,35 @@ class PlanningAgent(BaseAgent):
         self._engine = engine
         self._system_prompt = system_prompt
 
-    def plan(self, user_input: str, session: AgentSession) -> List[str]:
+    def plan(
+        self,
+        user_input: str,
+        session: AgentSession,
+        *,
+        context: Optional[ToolContext] = None,
+    ) -> List[str]:
+        history_lines: List[str] = []
+        for msg in session.messages:
+            role = msg.get("role", "unknown")
+            content = str(msg.get("content", "") or "").strip()
+            if not content:
+                continue
+            history_lines.append(f"[{role}] {content}")
+        history_text = "\n".join(history_lines) if history_lines else "(空)"
         messages = [
             {"role": "system", "content": self._system_prompt},
-            {"role": "user", "content": f"请为以下任务列出步骤：\n\n{user_input}"},
+            {
+                "role": "user",
+                "content": (
+                    "以下是当前对话的完整历史，请基于历史与新输入进行规划。\n\n"
+                    f"对话历史:\n{history_text}\n\n"
+                    f"本轮新输入:\n{user_input}\n\n"
+                    "请输出简洁步骤，每行一步。"
+                ),
+            },
         ]
         try:
-            response = self._engine.chat(messages, tools=None)
+            response = self._engine.chat(messages, tools=None, context=context)
             content = (response.content or "").strip()
             steps = [s.strip() for s in content.split("\n") if s.strip()]
             return steps[:20]
@@ -114,8 +136,19 @@ class AgentCoordinator:
         self.memory_service = memory_service
         self._system_prompt = system_prompt
         self._planning_agent = planning_agent
+        self._last_session: Optional[AgentSession] = None
 
-    def run(self, user_input: str, *, context: Optional[ToolContext] = None) -> AgentResponse:
+    @property
+    def last_session(self) -> Optional[AgentSession]:
+        return self._last_session
+
+    def run(
+        self,
+        user_input: str,
+        *,
+        context: Optional[ToolContext] = None,
+        session: Optional[AgentSession] = None,
+    ) -> AgentResponse:
         """
         编排一次用户请求：更新记忆、构建带记忆的 session、可选调用 PlanningAgent.plan、
         再委托 ConversationAgent.run 执行对话与工具调用，最后合并 steps 到响应。
@@ -128,11 +161,11 @@ class AgentCoordinator:
             hint = self.memory_service.build_system_context()
             if hint:
                 prompt = f"{prompt}\n\n已知用户记忆: {hint}"
-        session = AgentSession(system_prompt=prompt)
+        active_session = session if session is not None else AgentSession(system_prompt=prompt)
 
         steps: List[str] = []
         if self._planning_agent:
-            steps = self._planning_agent.plan(user_input, session)
+            steps = self._planning_agent.plan(user_input, active_session, context=active_context)
             logger.info(
                 "event=coordinator_planning_steps count=%s request_id=%s trace_id=%s",
                 len(steps),
@@ -150,11 +183,12 @@ class AgentCoordinator:
             raise ValueError("AgentCoordinator 需要至少一个 ConversationAgent")
 
         active_context.extra["memory_observed"] = True
-        response = conversation.run(user_input, context=active_context, session=session)
+        response = conversation.run(user_input, context=active_context, session=active_session)
+        self._last_session = active_session
         if steps and not response.steps:
             response = AgentResponse(
                 content=response.content,
                 steps=steps,
-                metadata=response.metadata,
+                metadata=dict(response.metadata or {}),
             )
         return response

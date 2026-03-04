@@ -58,7 +58,7 @@ flowchart TD
 
 - `src/engine/base.py`：`LLMGateway` 唯一 LLM 出入口；支持重试、超时与错误分类，并将 provider 原生响应适配为统一 `LLMReply` DTO。
 - `src/engine/types.py`：`LLMReply`、`LLMToolCall`、`LLMEngineProtocol` 等类型定义，供 Gateway 与编排层使用。
-- `src/config.py`：模型配置（MODEL_CONFIG）、默认 provider、Agent / 记忆 / 工具 / LLM 相关配置（含重试与 memory 后端/路径）。
+- `src/config.py`：基于 `.env` 的模型配置加载（`JARVIS_PROVIDERS`、`JARVIS_DEFAULT_PROVIDER`、`<PROVIDER>_{BASE_URL,API_KEY,MODEL}`）及 Agent / 记忆 / 工具 / LLM 配置（含重试与 memory 后端/路径）。
 - `src/common/errors.py`：统一错误类型（`JarvisError`、`TransientError`、`PermanentError`、`TimeoutError`、`CancelledError`），供 LLM 与工具层重试与上层兜底。
 - `src/observability/`：可观测性能力；`metrics` 提供进程内计数与直方图打点，`audit` 提供审计事件（如 memory_updated、tool_execution），与日志配合使用，详见 `docs/OBSERVABILITY.md`。
 
