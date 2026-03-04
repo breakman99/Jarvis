@@ -1,75 +1,66 @@
 # Jarvis
 
-personal intelligent assistant  
-一个面向真实工程演进的 Python Agent 项目：支持结构化 Agent 编排、可扩展工具层、命令行多轮交互，以及文件型长期记忆。
+Personal intelligent assistant — 面向生产可用的本地 Agent 框架：结构化编排、可扩展工具层、命令行交互、可插拔长期记忆与 LLM 网关。
 
-## 当前能力（V2）
+## 能力概览
 
-- **结构化 Agent 架构**
-  - `AgentApp` 负责应用装配
-  - `AgentOrchestrator` 负责主循环编排
-  - `AgentSession` / `Planner` / `AgentResponse` 分别管理会话、规划提示与输出
-- **可扩展 Tool 框架（重构后）**
-  - `ToolRegistry`：统一注册与查询工具
-  - `ToolExecutor`：统一执行、异常归一化
-  - 同时支持：
-    - 装饰器注册（`@tool(...)`）
-    - 显式注册（`register_function(...)`）
-- **LLM 网关抽象**
-  - `LLMGateway`（兼容 `AgentEngine` 旧命名）统一封装模型调用
-- **长期记忆（文件版）**
-  - `MemoryService` + `FileMemoryStore`
-  - 可持久化用户名字、语言偏好等信息（重启后仍保留）
+- **Agent 编排**：`AgentApp` 应用装配，`AgentOrchestrator` 主循环与 Think/Plan/Act/Review 阶段化，`AgentSession` / `Planner` / `AgentResponse` 管理会话与输出。
+- **工具框架**：`ToolRegistry` 统一注册与查询，`ToolExecutor` 统一执行与异常归一化；支持装饰器与显式注册；内置时间、加法、HTTP GET/POST 等工具。
+- **LLM 网关**：`LLMGateway` 统一封装模型调用，屏蔽 provider 差异。
+- **长期记忆**：`MemoryService` + 可插拔存储（文件 / SQLite 等），持久化用户画像与偏好，注入 system prompt。
+- **可观测性**：CLI / AgentApp / Orchestrator / ToolExecutor / LLMGateway / Memory 层打点，见 `docs/OBSERVABILITY.md`。
+
+## 商业级特性
+
+- **分层架构**：Interface / Application / Domain / Infrastructure 清晰分离，便于扩展与测试。
+- **错误与重试**：LLM 与工具层支持可配置重试、退避与错误分类；CLI 层对异常做友好兜底。
+- **可插拔记忆**：抽象存储接口，默认支持文件与 SQLite，便于替换为 Redis 等后端。
+- **多 Agent 能力**：`BaseAgent` 抽象与多 Agent 协作（规划/对话/工具等），由 `AgentCoordinator` 编排。
 
 ## 目录结构
 
 ```bash
 .
-├── agent.py                   # 顶层启动脚本：python agent.py
+├── agent.py                   # 顶层启动：python agent.py
 ├── src/
 │   ├── main.py                # CLI 入口（REPL）
-│   ├── config.py              # 模型配置 + Agent 运行配置
-│   ├── engine/
-│   │   └── base.py            # LLMGateway / AgentEngine
-│   ├── tools/
-│   │   ├── base.py            # ToolSpec / BaseTool / FunctionTool
-│   │   ├── registry.py        # ToolRegistry（注册中心）
-│   │   ├── executor.py        # ToolExecutor（执行与错误处理）
-│   │   ├── context.py         # ToolContext
-│   │   ├── bootstrap.py       # 全局 registry/executor 与 decorator 入口
-│   │   └── builtin/
-│   │       └── basic.py       # 内置工具示例（时间、加法）
-│   └── agent/
-│       ├── app.py             # AgentApp / AgentAppConfig
-│       ├── orchestrator.py    # Agent 主循环
-│       ├── session.py         # 会话消息管理
-│       ├── planner.py         # 规划层（可开关）
-│       ├── memory.py          # 长期记忆抽象与文件实现
-│       ├── response.py        # 响应模型
-│       └── simple.py          # 兼容层（旧接口转发）
+│   ├── config.py              # 模型与 Agent 配置
+│   ├── engine/                # LLMGateway
+│   ├── tools/                 # Tool 框架与内置工具
+│   └── agent/                 # App / Orchestrator / Session / Planner / Memory / BaseAgent
 ├── docs/
-│   ├── ARCHITECTURE.md
-│   └── TEACHING_PLAN.md
+│   ├── OVERVIEW.md            # 产品与框架总览
+│   ├── ARCHITECTURE.md        # 架构说明（分层与数据流）
+│   ├── DESIGN_AGENT.md       # Agent 层设计
+│   ├── DESIGN_TOOLS.md       # Tool 层设计
+│   ├── DESIGN_MEMORY.md      # Memory 层设计
+│   ├── DESIGN_LLMGATEWAY.md  # LLMGateway 设计
+│   └── OBSERVABILITY.md      # 日志与可观测性
 └── README.md
 ```
 
 ## 快速开始
 
-### 1) 安装依赖
+### 安装依赖
 
 ```bash
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2) 启动命令行交互
+### 启动命令行交互
 
 ```bash
 python agent.py
 ```
 
-输入 `exit` / `quit` / `q` 可退出。
+输入 `exit` / `quit` / `q` 退出。
+
+### 配置与密钥
+
+- API Key 等敏感配置应通过环境变量或本地配置文件提供，不要提交到版本库。
+- 长期记忆目录（如 `.jarvis/`）建议加入 `.gitignore`，仅本地使用。
 
 ## 开发者示例
 
@@ -88,9 +79,9 @@ print(app.chat("我叫Hanxu，以后请用中文回答。"))
 print(app.chat("现在几点？再帮我算一下 12.3 + 45.6"))
 ```
 
-## 工具开发方式（V2）
+## 工具开发
 
-### 方式 A：装饰器注册
+**装饰器注册：**
 
 ```python
 from src.tools.bootstrap import tool
@@ -103,7 +94,7 @@ def get_now():
     ...
 ```
 
-### 方式 B：显式注册
+**显式注册：**
 
 ```python
 from src.tools.bootstrap import tool_registry
@@ -116,10 +107,12 @@ tool_registry.register_function(
 )
 ```
 
-## 说明
+## 文档索引
 
-- 架构细节见 `docs/ARCHITECTURE.md`
-- 学习路线见 `docs/TEACHING_PLAN.md`
+- 总览与数据流：`docs/OVERVIEW.md`
+- 分层与扩展点：`docs/ARCHITECTURE.md`
+- 各层设计：`docs/DESIGN_AGENT.md`、`docs/DESIGN_TOOLS.md`、`docs/DESIGN_MEMORY.md`、`docs/DESIGN_LLMGATEWAY.md`
+- 日志与可观测性：`docs/OBSERVABILITY.md`
 
 ## License
 

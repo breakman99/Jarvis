@@ -58,10 +58,17 @@ class AgentOrchestrator:
                 prompt = f"{prompt}\n\n已知用户记忆: {memory_hint}"
         self.session = AgentSession(system_prompt=prompt)
 
-    def run(self, user_input: str, *, context: Optional[ToolContext] = None) -> AgentResponse:
+    def run(
+        self,
+        user_input: str,
+        *,
+        context: Optional[ToolContext] = None,
+        session: Optional[AgentSession] = None,
+    ) -> AgentResponse:
+        active = session if session is not None else self.session
         if self.memory_service:
             self.memory_service.observe_user_input(user_input)
-        self.session.append_user(user_input)
+        active.append_user(user_input)
         steps = self.planner.plan_steps(user_input)
         phase_log: List[str] = []
 
@@ -69,10 +76,10 @@ class AgentOrchestrator:
             logger.debug(
                 "iteration=%s messages_count=%s",
                 iteration + 1,
-                len(self.session.messages),
+                len(active.messages),
             )
             response = self.engine.chat(
-                self.session.messages,
+                active.messages,
                 tools=self.tool_registry.to_openai_tools(),
             )
             resp_msg = response.choices[0].message
@@ -86,7 +93,7 @@ class AgentOrchestrator:
                 else:
                     phase_log.append("review")
                 content = resp_msg.content or ""
-                self.session.append_assistant(content)
+                active.append_assistant(content)
                 logger.info("finished_with=success")
                 return AgentResponse(
                     content=content,
@@ -104,10 +111,10 @@ class AgentOrchestrator:
                 phase_log.extend(["think", "plan", "act"])
             else:
                 phase_log.append("act")
-            self.session.append_assistant_tool_calls(resp_msg)
+            active.append_assistant_tool_calls(resp_msg)
             for tool_call in resp_msg.tool_calls:
                 execution = self.tool_executor.execute_tool_call(tool_call, context=context)
-                self.session.append_tool_message(execution.to_tool_message())
+                active.append_tool_message(execution.to_tool_message())
 
         logger.info("finished_with=max_iterations")
         return AgentResponse(

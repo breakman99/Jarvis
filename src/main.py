@@ -1,4 +1,5 @@
 import logging
+import traceback
 
 from .agent import AgentApp, AgentAppConfig
 
@@ -33,7 +34,13 @@ def main():
 
         input_summary = user_input[:80] + "..." if len(user_input) > 80 else user_input
         logger.info("session=cli user_input_len=%s input_summary=%s", len(user_input), input_summary)
-        result = app.chat(user_input)
+        try:
+            result = app.chat(user_input)
+        except Exception as exc:
+            logger.exception("session=cli chat_failed error=%s", exc)
+            traceback.print_exc()
+            print("🤖 Agent> 当前服务出现异常，请稍后重试。若持续出现请查看日志。\n")
+            continue
         reply_summary = (result[:80] + "...") if len(result) > 80 else result
         logger.info("session=cli reply_len=%s reply_summary=%s", len(result), reply_summary)
         print(f"🤖 Agent> {result}\n")

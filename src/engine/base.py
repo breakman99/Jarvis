@@ -1,60 +1,121 @@
+"""
+LLM 网关：唯一 LLM 调用出入口，支持可配置重试、超时与错误分类。
+"""
+from __future__ import annotations
+
 import logging
+import random
 import time
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
 
-from ..config import MODEL_CONFIG
+from ..config import LLM_CONFIG, MODEL_CONFIG
 
 logger = logging.getLogger(__name__)
 
 
+def _is_retryable(exc: BaseException) -> bool:
+    """判定是否为可重试错误：网络、超时、5xx、429。"""
+    msg = (getattr(exc, "message", None) or str(exc)).lower()
+    if "timeout" in msg or "timed out" in msg:
+        return True
+    if "connection" in msg or "connect" in msg:
+        return True
+    code = getattr(exc, "status_code", None)
+    if code is not None:
+        if code == 429:
+            return True
+        if 500 <= (code if isinstance(code, int) else 0) < 600:
+            return True
+    # OpenAI 异常类型
+    t = type(exc).__name__
+    if "RateLimit" in t or "Timeout" in t or "Connection" in t or "APIConnection" in t:
+        return True
+    if "APIStatusError" in t and hasattr(exc, "status_code"):
+        sc = getattr(exc, "status_code", 0)
+        if sc == 429 or (isinstance(sc, int) and 500 <= sc < 600):
+            return True
+    return False
+
+
 class LLMGateway:
     """
-    Agent 使用的唯一 LLM 网关，屏蔽不同 provider（deepseek / gemini 等）的差异。
-
-    设计意图：Orchestrator 只依赖本网关的 chat(messages, tools) 接口，不关心
-    base_url、api_key、model 名等；更换或扩展 provider 仅需改配置或本模块实现。
-    协作：由 AgentApp 构造并注入 Orchestrator，日志在每次 chat 时打点（provider、latency、是否带 tools）。
+    Agent 使用的唯一 LLM 网关，屏蔽 provider 差异；支持重试、超时与错误分类。
     """
 
     def __init__(self, provider: str = "deepseek"):
+        if provider not in MODEL_CONFIG:
+            raise ValueError(f"未知 provider: {provider}，可选: {list(MODEL_CONFIG.keys())}")
         self._provider = provider
         target = MODEL_CONFIG[provider]
-        self.client = OpenAI(api_key=target["api_key"], base_url=target["base_url"])
-        self.model = target["model"]
+        api_key = target.get("api_key") or ""
+        base_url = target.get("base_url") or ""
+        if not api_key and "OPENAI_API_KEY" not in str(target):
+            logger.warning(
+                "llm_gateway provider=%s api_key 未设置，请配置环境变量（如 DEEPSEEK_API_KEY）",
+                provider,
+            )
+        self.client = OpenAI(api_key=api_key or "sk-placeholder", base_url=base_url)
+        self.model = target.get("model", "deepseek-chat")
+        self._max_retries = LLM_CONFIG.get("max_retries", 3)
+        self._base_backoff_ms = LLM_CONFIG.get("base_backoff_ms", 1000)
+        self._max_backoff_ms = LLM_CONFIG.get("max_backoff_ms", 30000)
+        self._timeout_seconds = LLM_CONFIG.get("timeout_seconds", 60)
 
     def chat(
         self,
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
     ):
-        """LLM 调用统一入口，隔离 provider 差异。"""
+        """LLM 调用统一入口：重试可重试错误，指数退避+抖动。"""
         provider = getattr(self, "_provider", "unknown")
         used_tools = bool(tools)
-        start = time.perf_counter()
-        try:
-            out = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                tools=tools,
-                tool_choice="auto" if tools else None,
-            )
-            latency_ms = (time.perf_counter() - start) * 1000
-            logger.info(
-                "llm_chat provider=%s model=%s latency_ms=%.0f tools=%s",
-                provider,
-                self.model,
-                latency_ms,
-                used_tools,
-            )
-            return out
-        except Exception as exc:
-            logger.error(
-                "llm_chat_error provider=%s model=%s error=%s",
-                provider,
-                self.model,
-                str(exc),
-            )
-            raise
-
+        last_exc: Optional[BaseException] = None
+        for attempt in range(self._max_retries + 1):
+            start = time.perf_counter()
+            try:
+                out = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    tools=tools,
+                    tool_choice="auto" if tools else None,
+                    request_timeout=float(self._timeout_seconds),
+                )
+                latency_ms = (time.perf_counter() - start) * 1000
+                logger.info(
+                    "llm_chat provider=%s model=%s latency_ms=%.0f tools=%s",
+                    provider,
+                    self.model,
+                    latency_ms,
+                    used_tools,
+                )
+                return out
+            except Exception as exc:
+                last_exc = exc
+                latency_ms = (time.perf_counter() - start) * 1000
+                logger.error(
+                    "llm_chat_error provider=%s model=%s attempt=%s error=%s",
+                    provider,
+                    self.model,
+                    attempt + 1,
+                    str(exc),
+                )
+                if attempt == self._max_retries or not _is_retryable(exc):
+                    raise
+                backoff_ms = min(
+                    self._base_backoff_ms * (2 ** attempt),
+                    self._max_backoff_ms,
+                )
+                jitter = backoff_ms * 0.2 * (random.random() * 2 - 1)
+                sleep_sec = (backoff_ms + jitter) / 1000.0
+                logger.info(
+                    "llm_chat_retry provider=%s backoff_ms=%.0f next_attempt=%s",
+                    provider,
+                    sleep_sec * 1000,
+                    attempt + 2,
+                )
+                time.sleep(sleep_sec)
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("llm_chat unexpected exit")

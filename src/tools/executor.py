@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
@@ -11,8 +12,20 @@ from .registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
-# ToolExecutor：根据 ToolRegistry 执行单次工具调用，结果归一化为 ToolResult/ToolExecution；
-# 由 Orchestrator 调用 execute_tool_call(tool_call, context)，可选传入 ToolContext。
+try:
+    from ..config import TOOL_CONFIG
+except ImportError:
+    TOOL_CONFIG = {"max_retries": 2}
+
+
+def _tool_error_retryable(exc: BaseException) -> bool:
+    """工具执行异常是否可重试：超时、连接、5xx。"""
+    msg = str(exc).lower()
+    if "timeout" in msg or "timed out" in msg or "connection" in msg or "connect" in msg:
+        return True
+    if "50" in msg or "502" in msg or "503" in msg or "504" in msg:
+        return True
+    return False
 
 
 @dataclass
@@ -34,6 +47,7 @@ class ToolExecution:
 class ToolExecutor:
     def __init__(self, registry: ToolRegistry):
         self.registry = registry
+        self._max_retries = TOOL_CONFIG.get("max_retries", 2)
 
     def execute(
         self,
@@ -54,38 +68,53 @@ class ToolExecutor:
             )
 
         args_summary = json.dumps(arguments, ensure_ascii=False)[:200]
-        try:
-            result = tool.execute(arguments, context)
-            logger.info(
-                "tool_exec tool_name=%s ok=%s args_summary=%s",
-                tool_name,
-                result.ok,
-                args_summary,
-            )
-            if not result.ok:
-                logger.error(
-                    "tool_exec_failed tool_name=%s error=%s",
+        last_exc: Optional[Exception] = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                result = tool.execute(arguments, context)
+                logger.info(
+                    "tool_exec tool_name=%s ok=%s args_summary=%s retried=%s",
                     tool_name,
-                    result.error,
+                    result.ok,
+                    args_summary,
+                    attempt > 0,
                 )
-            return ToolExecution(
-                tool_name=tool_name,
-                arguments=arguments,
-                result=result,
-                tool_call_id=tool_call_id,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.error(
-                "tool_exec_exception tool_name=%s exception=%s",
-                tool_name,
-                str(exc),
-            )
-            return ToolExecution(
-                tool_name=tool_name,
-                arguments=arguments,
-                result=ToolResult(ok=False, content="", error=str(exc)),
-                tool_call_id=tool_call_id,
-            )
+                if attempt > 0 and result.ok:
+                    result.metadata = dict(result.metadata or {}, _retried=attempt)
+                if not result.ok:
+                    logger.error(
+                        "tool_exec_failed tool_name=%s error=%s",
+                        tool_name,
+                        result.error,
+                    )
+                return ToolExecution(
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    result=result,
+                    tool_call_id=tool_call_id,
+                )
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                logger.error(
+                    "tool_exec_exception tool_name=%s attempt=%s exception=%s",
+                    tool_name,
+                    attempt + 1,
+                    str(exc),
+                )
+                if attempt == self._max_retries or not _tool_error_retryable(exc):
+                    return ToolExecution(
+                        tool_name=tool_name,
+                        arguments=arguments,
+                        result=ToolResult(ok=False, content="", error=str(exc)),
+                        tool_call_id=tool_call_id,
+                    )
+                time.sleep(0.5 * (attempt + 1))
+        return ToolExecution(
+            tool_name=tool_name,
+            arguments=arguments,
+            result=ToolResult(ok=False, content="", error=str(last_exc)),
+            tool_call_id=tool_call_id,
+        )
 
     def execute_tool_call(
         self, tool_call: Any, context: Optional[ToolContext] = None

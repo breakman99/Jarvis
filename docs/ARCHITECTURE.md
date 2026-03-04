@@ -1,17 +1,15 @@
-## Jarvis 架构说明（V2）
+## Jarvis 架构说明
 
-> 本文档描述当前代码实现（`src/`）对应的真实架构。  
-> 重点：Tool 层重构、Agent 全结构化、长期记忆接入。
+> 描述当前实现对应的分层架构、模块职责与运行时数据流；约束与扩展点供实现与演进时对齐。
 
 ---
 
-## 1. 架构目标
+## 1. 架构目标与约束
 
-Jarvis V2 的核心目标：
-
-- Tool 体系从“字典 + 函数”升级为“注册中心 + 执行器 + 统一结果模型”。
-- Agent 从单类实现升级为分层类协作（App / Orchestrator / Session / Planner / Memory）。
-- 保持 CLI 可持续交互，并支持跨会话记忆。
+- **分层清晰**：Interface（CLI/入口）→ Application（App/Coordinator）→ Domain（Agent/Session/Tools/Memory）→ Infrastructure（LLMGateway/存储/配置）。
+- **单一职责**：每层只依赖下层接口，不跨层直连实现。
+- **可替换性**：记忆存储、LLM provider、工具集均可通过接口与配置替换，无需改业务编排。
+- **可观测与可测试**：关键路径打点；LLM/Tool 可注入 mock 便于单测与集成测试。
 
 ---
 
@@ -19,7 +17,7 @@ Jarvis V2 的核心目标：
 
 ```mermaid
 flowchart TD
-    cli[CLI_main.py] --> app[AgentApp]
+    cli[CLI_main] --> app[AgentApp]
     app --> orchestrator[AgentOrchestrator]
     orchestrator --> session[AgentSession]
     orchestrator --> planner[Planner]
@@ -30,84 +28,34 @@ flowchart TD
     registry --> builtin[BuiltinTools]
 ```
 
+（多 Agent 演进后：app → AgentCoordinator → AgentRegistry → BaseAgent 子类；Memory/LLM/Tools 由 Coordinator 统一持有并注入各 Agent。）
+
 ---
 
 ## 3. 关键模块职责
 
-### 3.1 入口与应用装配
+### 3.1 接口层（Interface）
 
-- `agent.py`
-  - 顶层脚本，转发到 `src.main.main()`。
-- `src/main.py`
-  - 命令行 REPL：读取用户输入、调用 `AgentApp.chat()`、打印输出。
-- `src/agent/app.py`
-  - `AgentApp` 负责依赖注入：
-    - 创建 `LLMGateway` / `Planner` / `MemoryService` / `AgentOrchestrator`
-  - `AgentAppConfig` 统一控制 provider、planner 开关、迭代上限、memory 后端等。
+- `agent.py`：顶层脚本，转发至 `src.main.main()`。
+- `src/main.py`：CLI REPL；读取输入、调用 `AgentApp.chat()`、输出结果；对未捕获异常做友好提示并保持 REPL 不退出。
 
-### 3.2 Agent 编排层
+### 3.2 应用编排层（Application）
 
-- `src/agent/orchestrator.py`
-  - `AgentOrchestrator` 是主流程核心：
-    1. 记录用户输入（会话）
-    2. 调用 LLM
-    3. 处理 tool_calls（通过 `ToolExecutor`）
-    4. 追加 tool 消息并继续循环
-    5. 产出 `AgentResponse`
-- `src/agent/session.py`
-  - `AgentSession` 管理消息历史：
-    - `append_user`
-    - `append_assistant`
-    - `append_assistant_tool_calls`
-    - `append_tool_message`
-- `src/agent/planner.py`
-  - `Planner` 提供规划提示与步骤占位能力（可开关）。
-- `src/agent/response.py`
-  - `AgentResponse` 统一输出结构（`content` / `steps` / `metadata`）。
+- `src/agent/app.py`：`AgentApp` 依赖注入与装配（LLMGateway / Planner / MemoryService / Orchestrator 或 Coordinator）；对外 `chat(user_input) -> str`。`AgentAppConfig` 统一控制 provider、迭代上限、planner、memory 后端与路径。
 
-### 3.3 Tool 层（重构后）
+### 3.3 领域层（Domain）
 
-- `src/tools/base.py`
-  - `ToolSpec`：工具描述模型
-  - `BaseTool`：工具抽象基类
-  - `FunctionTool`：普通 Python 函数的工具适配器
-  - `ToolResult`：统一结果模型
-- `src/tools/registry.py`
-  - `ToolRegistry`：统一注册、查询、导出 OpenAI tools schema。
-  - 同时支持：
-    - 装饰器注册：`registry.tool(...)`
-    - 显式注册：`registry.register_function(...)`
-- `src/tools/executor.py`
-  - `ToolExecutor` 负责执行工具调用、解析参数、归一化异常。
-- `src/tools/bootstrap.py`
-  - 提供全局单例：
-    - `tool_registry`
-    - `tool_executor`
-    - `tool`（装饰器入口）
-- `src/tools/builtin/basic.py`
-  - 内置示例工具：
-    - `get_current_time`（装饰器注册）
-    - `add_numbers`（显式注册）
+- **编排核心**：`orchestrator.py` 中 `AgentOrchestrator` 负责单次请求的主循环（记忆观察 → 会话更新 → LLM 调用 → 工具执行与消息回写 → 产出 AgentResponse）。未来由 `AgentCoordinator` 管理多 Agent 协作。
+- **会话**：`session.py` 中 `AgentSession` 管理 messages（append_user / append_assistant / append_assistant_tool_calls / append_tool_message）。
+- **规划**：`planner.py` 中 `Planner` 提供规划提示与步骤占位；可演进为 PlanningAgent。
+- **记忆**：`memory.py` 中 `MemoryService` 对外提供 build_system_context、observe_user_input；存储由 `BaseMemoryStore` 抽象，实现包括 File / SQLite。
+- **工具**：`tools/base.py`（ToolSpec / BaseTool / FunctionTool / ToolResult）、`registry.py`（ToolRegistry）、`executor.py`（ToolExecutor）、`context.py`（ToolContext）；builtin 在 bootstrap 或 __init__ 中注册。
+- **响应**：`response.py` 中 `AgentResponse`（content / steps / metadata）。
 
-### 3.4 LLM 网关层
+### 3.4 基础设施层（Infrastructure）
 
-- `src/engine/base.py`
-  - `LLMGateway`：唯一 LLM 调用入口，屏蔽 provider 差异。
-
-### 3.5 配置层
-
-- `src/config.py`
-  - `MODEL_CONFIG` / `DEFAULT_PROVIDER`
-  - `AGENT_CONFIG`（`max_iterations`、`enable_planner`、`memory_backend`、`memory_file_path`）
-
-### 3.6 长期记忆层
-
-- `src/agent/memory.py`
-  - `BaseMemoryStore`：存储抽象
-  - `FileMemoryStore`：文件持久化实现
-  - `MemoryService`：
-    - 启动时提供记忆上下文（注入 system prompt）
-    - 运行时解析用户输入并更新持久化记忆（当前支持名字、语言偏好）
+- `src/engine/base.py`：`LLMGateway` 唯一 LLM 出入口；支持重试、超时与错误分类。
+- `src/config.py`：模型配置（MODEL_CONFIG）、默认 provider、Agent 与记忆相关配置（含重试与 memory 后端/路径）。
 
 ---
 
@@ -142,63 +90,23 @@ sequenceDiagram
     A-->>M: content
     M-->>U: 输出回答
 ```
----
-## 5. 设计理念与分层优势
-
-### 5.1 `AgentApp`：应用壳与组装器
-
-- **职责**：集中负责依赖注入和应用装配，把 `LLMGateway` / `Planner` / `MemoryService` / `AgentOrchestrator` 等组件组合在一起，对外只暴露简单的 `chat(user_input)` 接口。
-- **优势**：
-  - 把「应用形态」（命令行、HTTP 服务等）与「Agent 内部逻辑」解耦。
-  - 更容易在不同运行方式之间切换，只需更换入口，不必修改 Agent 内核。
-
-### 5.2 Agent 编排层：专注“如何用 LLM + 工具解决问题”
-
-- **职责**：`AgentOrchestrator` + `AgentSession` + `Planner` + `MemoryService` 一起，负责：
-  - 如何组织多轮对话。
-  - 何时调用工具、如何处理 tool_calls。
-  - 何时读取/写入长期记忆。
-- **优势**：
-  - 高内聚：只关心智能流程本身，不关心底层 API/网络细节。
-  - 易演进：将来加多 Agent 协作、更复杂的规划与记忆策略，只需扩展这一层。
-  - 易测试：可以通过 fake 的 `LLMGateway` 来单测 Orchestrator 的流程逻辑。
-
-### 5.3 `LLMGateway`：屏蔽 LLM 提供商差异
-
-- **职责**：统一承担与底层 LLM 服务通信的细节：
-  - 选用哪个 provider（deepseek / gemini 等）。
-  - 使用什么 base_url / api_key / model 名。
-  - 调用哪个 SDK、如何传递 `messages` 和 `tools`。
-- **优势**：
-  - 上层只需调用 `chat(messages, tools)`，像调用普通函数一样使用 LLM。
-  - 更换模型提供商或接入本地模型时，只需要更改配置或替换 Gateway 实现。
-  - 便于横切能力（重试、超时、日志、成本统计）集中在一处实现，而不污染 Agent 代码。
-  - **特别适合 mock 测试**：在测试环境中可以注入一个假的 Gateway，只返回预设的 `message/tool_calls`，无需真正访问网络，就能验证 Agent 的决策与流程。
-
-整体协作可以概括为：
-
-- `AgentApp` 负责“把部件装好，提供一个统一入口”；
-- Agent 编排层负责“拿到用户输入后，如何合理地使用 LLM 与工具”；
-- `LLMGateway` 负责“具体怎么跟某个 LLM 服务打交道”。
----
-
-## 6. 扩展建议
-
-- 新增工具：在 `src/tools/builtin/` 添加模块并注册，无需改 Orchestrator 主循环。
-- 替换记忆后端：实现新的 `BaseMemoryStore`（如 SQLite/Redis）后注入 `MemoryService`。
-- 增强 Planner：把占位规划升级为真实“计划-执行-验证”链路。
-- 生产化：日志与打点见 `docs/OBSERVABILITY.md`；可在此基础上增加追踪、重试与测试覆盖。
 
 ---
 
-## 7. 与学习文档关系
+## 5. 设计原则摘要
 
-- `docs/TEACHING_PLAN.md`：学习路径与阶段目标。
-- 本文档：当前代码真实架构快照。
+- **AgentApp**：应用壳与组装器；入口形态（CLI/HTTP）与 Agent 内核解耦。
+- **编排层**：专注“如何用 LLM + 工具 + 记忆”完成请求；高内聚、易测、易扩展多 Agent。
+- **LLMGateway**：屏蔽 provider 差异；重试、超时、日志集中在此层。
+- **Memory**：存储抽象 + 多后端（File/SQLite）；提取逻辑通过 Observer/规则扩展，避免散落 if-else。
 
-当你重构组件边界时，应优先更新本文档的：
+---
 
-- 分层图
-- 关键模块职责
-- 运行时数据流
+## 6. 扩展点
 
+- **新增工具**：在 `src/tools/builtin/` 实现并注册，无需改 Orchestrator 主循环。
+- **记忆后端**：实现 `BaseMemoryStore`（如 SQLite/Redis）并注入 MemoryService。
+- **多 Agent**：引入 BaseAgent 与 AgentCoordinator，注册 PlanningAgent / ConversationAgent 等，由 Coordinator 决定调用顺序与工具集。
+- **横切能力**：在 LLMGateway 增加重试/超时；在 ToolExecutor 增加可选的工具级重试与幂等标记；在 CLI 统一异常兜底。
+
+重构组件边界时，请同步更新本文档的分层图、模块职责与数据流。

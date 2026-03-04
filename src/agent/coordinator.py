@@ -1,0 +1,151 @@
+"""
+AgentCoordinator：多 Agent 编排；ConversationAgent / PlanningAgent 实现。
+"""
+from __future__ import annotations
+
+import logging
+from typing import Any, List, Optional
+
+from ..engine import LLMGateway
+from ..tools import ToolContext, ToolExecutor, ToolRegistry
+from .base_agent import BaseAgent
+from .memory import MemoryService
+from .orchestrator import AgentOrchestrator, AgentOrchestratorConfig
+from .planner import Planner
+from .response import AgentResponse
+from .session import AgentSession
+
+logger = logging.getLogger(__name__)
+
+
+class ConversationAgent(BaseAgent):
+    """通用对话与工具执行 Agent，内部委托 AgentOrchestrator。"""
+
+    def __init__(
+        self,
+        engine: LLMGateway,
+        tool_registry: ToolRegistry,
+        tool_executor: ToolExecutor,
+        config: Optional[AgentOrchestratorConfig] = None,
+        planner: Optional[Planner] = None,
+        memory_service: Optional[MemoryService] = None,
+    ):
+        self._orchestrator = AgentOrchestrator(
+            engine=engine,
+            tool_registry=tool_registry,
+            tool_executor=tool_executor,
+            config=config or AgentOrchestratorConfig(),
+            planner=planner or Planner(enabled=False),
+            memory_service=memory_service,
+        )
+
+    def plan(self, user_input: str, session: AgentSession) -> List[str]:
+        return self._orchestrator.planner.plan_steps(user_input)
+
+    def run(
+        self,
+        user_input: str,
+        *,
+        context: Optional[ToolContext] = None,
+        session: Optional[AgentSession] = None,
+    ) -> AgentResponse:
+        return self._orchestrator.run(user_input, context=context, session=session)
+
+
+class PlanningAgent(BaseAgent):
+    """仅做规划：调用 LLM 生成步骤列表，不执行工具。"""
+
+    def __init__(
+        self,
+        engine: LLMGateway,
+        system_prompt: str = "你是一个任务规划助手。根据用户输入，输出简洁的步骤列表，每行一步。不要执行工具，只输出规划。",
+    ):
+        self._engine = engine
+        self._system_prompt = system_prompt
+
+    def plan(self, user_input: str, session: AgentSession) -> List[str]:
+        messages = [
+            {"role": "system", "content": self._system_prompt},
+            {"role": "user", "content": f"请为以下任务列出步骤：\n\n{user_input}"},
+        ]
+        try:
+            response = self._engine.chat(messages, tools=None)
+            content = (response.choices[0].message.content or "").strip()
+            steps = [s.strip() for s in content.split("\n") if s.strip()]
+            return steps[:20]
+        except Exception as e:
+            logger.warning("planning_agent_plan_failed error=%s", e)
+            return []
+
+    def run(
+        self,
+        user_input: str,
+        *,
+        context: Optional[Any] = None,
+        session: Optional[AgentSession] = None,
+    ) -> AgentResponse:
+        steps = self.plan(user_input, session or AgentSession(system_prompt=self._system_prompt))
+        return AgentResponse(
+            content="(规划完成)",
+            steps=steps,
+            metadata={"agent": self.name},
+        )
+
+
+class AgentCoordinator:
+    """
+    多 Agent 编排：持有 session、memory、engine、tools 与多个 BaseAgent；
+    run() 先更新记忆，可选调用 PlanningAgent 得到步骤，再交给 ConversationAgent 执行并返回。
+    """
+
+    def __init__(
+        self,
+        *,
+        engine: LLMGateway,
+        tool_registry: ToolRegistry,
+        tool_executor: ToolExecutor,
+        agents: List[BaseAgent],
+        memory_service: Optional[MemoryService] = None,
+        system_prompt: str = "你是一个严谨的助手。请善用工具回答问题。",
+        planning_agent: Optional[PlanningAgent] = None,
+    ):
+        self.engine = engine
+        self.tool_registry = tool_registry
+        self.tool_executor = tool_executor
+        self._agents = {a.name: a for a in agents}
+        self.memory_service = memory_service
+        self._system_prompt = system_prompt
+        self._planning_agent = planning_agent
+
+    def run(self, user_input: str, *, context: Optional[ToolContext] = None) -> AgentResponse:
+        if self.memory_service:
+            self.memory_service.observe_user_input(user_input)
+        prompt = self._system_prompt
+        if self.memory_service:
+            hint = self.memory_service.build_system_context()
+            if hint:
+                prompt = f"{prompt}\n\n已知用户记忆: {hint}"
+        session = AgentSession(system_prompt=prompt)
+
+        steps: List[str] = []
+        if self._planning_agent:
+            steps = self._planning_agent.plan(user_input, session)
+            logger.info("coordinator planning_steps count=%s", len(steps))
+
+        conversation = self._agents.get("ConversationAgent")
+        if not conversation:
+            for a in self._agents.values():
+                if isinstance(a, ConversationAgent):
+                    conversation = a
+                    break
+        if not conversation:
+            raise ValueError("AgentCoordinator 需要至少一个 ConversationAgent")
+
+        response = conversation.run(user_input, context=context, session=session)
+        if steps and not response.steps:
+            response = AgentResponse(
+                content=response.content,
+                steps=steps,
+                metadata=response.metadata,
+            )
+        return response
