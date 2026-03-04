@@ -12,9 +12,6 @@ from typing import Any, Dict, Optional
 
 import requests
 
-from ..base import ToolResult
-from ..bootstrap import tool_registry
-
 # 单次响应最大保留字符数，超出部分截断并注明
 MAX_RESPONSE_CHARS = 8000
 
@@ -80,55 +77,56 @@ def http_post_json(
     return _truncate(text)
 
 
-# 注册到全局 ToolRegistry，供 Agent 使用
-
-if not tool_registry.has("http_get"):
-    tool_registry.register_function(
-        name="http_get",
-        description=(
-            "发起 HTTP GET 请求，获取指定 URL 的页面或 API 返回内容。"
-            "适用于：查询开放 API、获取网页内容摘要、查天气/新闻等。"
-            "参数 url 必须是完整的 HTTP/HTTPS 地址。"
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "url": {"type": "string", "description": "完整的请求 URL，例如 https://api.example.com/data"},
-                "headers": {
-                    "type": "object",
-                    "description": "可选的 HTTP 请求头，键值均为字符串",
-                    "additionalProperties": {"type": "string"},
+def register_tools(registry) -> None:
+    if not registry.has("http_get"):
+        registry.register_function(
+            name="http_get",
+            description=(
+                "发起 HTTP GET 请求，获取指定 URL 的页面或 API 返回内容。"
+                "适用于：查询开放 API、获取网页内容摘要、查天气/新闻等。"
+                "参数 url 必须是完整的 HTTP/HTTPS 地址。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "完整的请求 URL，例如 https://api.example.com/data"},
+                    "headers": {
+                        "type": "object",
+                        "description": "可选的 HTTP 请求头，键值均为字符串",
+                        "additionalProperties": {"type": "string"},
+                    },
+                    "timeout": {"type": "number", "description": "请求超时秒数，可选，默认 15"},
                 },
-                "timeout": {"type": "number", "description": "请求超时秒数，可选，默认 15"},
+                "required": ["url"],
             },
-            "required": ["url"],
-        },
-        func=http_get,
-    )
+            idempotent=True,
+            func=http_get,
+        )
 
-if not tool_registry.has("http_post_json"):
-    tool_registry.register_function(
-        name="http_post_json",
-        description=(
-            "发起 HTTP POST 请求，请求体为 JSON。"
-            "适用于：调用需要 POST 的 REST API、提交表单数据等。"
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "url": {"type": "string", "description": "完整的请求 URL"},
-                "json_body": {
-                    "type": "object",
-                    "description": "POST 的 JSON 请求体，键值随意",
+    if not registry.has("http_post_json"):
+        registry.register_function(
+            name="http_post_json",
+            description=(
+                "发起 HTTP POST 请求，请求体为 JSON。"
+                "适用于：调用需要 POST 的 REST API、提交表单数据等。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "完整的请求 URL"},
+                    "json_body": {
+                        "type": "object",
+                        "description": "POST 的 JSON 请求体，键值随意",
+                    },
+                    "headers": {
+                        "type": "object",
+                        "description": "可选的 HTTP 请求头",
+                        "additionalProperties": {"type": "string"},
+                    },
+                    "timeout": {"type": "number", "description": "请求超时秒数，可选"},
                 },
-                "headers": {
-                    "type": "object",
-                    "description": "可选的 HTTP 请求头",
-                    "additionalProperties": {"type": "string"},
-                },
-                "timeout": {"type": "number", "description": "请求超时秒数，可选"},
+                "required": ["url"],
             },
-            "required": ["url"],
-        },
-        func=http_post_json,
-    )
+            idempotent=False,
+            func=http_post_json,
+        )

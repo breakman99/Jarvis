@@ -18,6 +18,3 @@ colorlog>=6.8.0
 # google gemini
 google-genai>=1.8.0
 
-# search on the web
-requests>=2.31.0
-

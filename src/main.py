@@ -1,3 +1,9 @@
+"""
+CLI REPL 入口。
+
+负责：初始化 AgentApp、循环读取用户输入、调用 app.chat() 并输出结果；
+对异常做友好提示并保持 REPL 不退出。日志格式与级别在此统一配置。
+"""
 import logging
 import traceback
 
@@ -12,7 +18,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def main():
+def main() -> None:
+    """启动 REPL：创建默认配置的 AgentApp，进入交互循环直到用户退出。"""
     app = AgentApp(config=AgentAppConfig())
 
     print("🚀 Jarvis Agent 已启动，进入交互模式。")

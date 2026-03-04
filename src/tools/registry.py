@@ -11,7 +11,7 @@ class ToolRegistry:
 
     设计意图：Agent 只需从本注册表获取 to_openai_tools() 传给 LLM，新增工具只需
     在此注册，无需改 Orchestrator。协作：ToolExecutor 通过 registry.get(name) 取
-    工具并执行；builtin 模块在导入时向全局 tool_registry 注册。
+    工具并执行；builtin 工具由应用装配阶段显式注册。
     """
 
     def __init__(self):
@@ -28,10 +28,16 @@ class ToolRegistry:
         name: str,
         description: str,
         parameters: Dict[str, Any],
+        idempotent: bool = False,
         func: Callable[..., Any],
     ) -> BaseTool:
         tool = FunctionTool(
-            spec=ToolSpec(name=name, description=description, parameters=parameters),
+            spec=ToolSpec(
+                name=name,
+                description=description,
+                parameters=parameters,
+                idempotent=idempotent,
+            ),
             func=func,
         )
         self.register(tool)
@@ -43,12 +49,14 @@ class ToolRegistry:
         name: Optional[str] = None,
         description: str,
         parameters: Dict[str, Any],
+        idempotent: bool = False,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             self.register_function(
                 name=name or func.__name__,
                 description=description,
                 parameters=parameters,
+                idempotent=idempotent,
                 func=func,
             )
             return func

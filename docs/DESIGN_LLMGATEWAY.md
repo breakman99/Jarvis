@@ -1,6 +1,6 @@
 # LLMGateway 层设计
 
-> 与底层 LLM 服务通信的唯一出入口；对上层提供统一的 chat(messages, tools) 接口；集中处理重试、超时与错误分类。
+> 与底层 LLM 服务通信的唯一出入口；对上层提供统一的 `chat(messages, tools, context)` 接口并返回 `LLMReply` DTO；集中处理重试、超时与错误分类。
 
 ---
 
@@ -25,11 +25,11 @@
 ## 3. LLMGateway 接口与行为
 
 - **构造**：`LLMGateway(provider: str)`；从 MODEL_CONFIG 取 base_url、api_key、model；构造 OpenAI(api_key=..., base_url=...) 的 client。provider 不在配置中时应有明确错误或 fallback。
-- **chat(messages, tools?)**：
+- **chat(messages, tools?, context?)**：
   - 使用配置的 timeout、max_retries、backoff 等。
   - 可重试：连接失败、超时、5xx、限流（429）等；退避采用指数+抖动。
   - 不可重试：4xx（除 429）、认证失败、参数错误；记录日志后直接抛出。
-  - 成功：记录 provider、model、latency_ms、是否带 tools；返回原始 completion 对象。
+  - 成功：记录 provider、model、latency_ms、是否带 tools；并把 provider 原始响应适配为 `LLMReply(content, tool_calls, raw)`。
   - 失败：记录 llm_chat_error 后抛出或按策略重试后抛出。
 
 ---
@@ -44,7 +44,7 @@
 ## 5. 与 Agent 层关系
 
 - AgentApp 根据 config.provider 构造 LLMGateway 并注入 Orchestrator（或 AgentCoordinator）。
-- 编排层每轮调用 engine.chat(session.messages, tool_registry.to_openai_tools())；不处理重试细节，仅处理返回的 message/tool_calls 或异常。
+- 编排层每轮调用 `engine.chat(session.messages, tool_registry.to_openai_tools(), context=...)`；不处理重试细节，仅处理 `LLMReply` 或异常。
 
 ---
 

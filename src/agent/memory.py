@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol
 
+from ..observability import emit_audit_event
+
 logger = logging.getLogger(__name__)
 
 # 默认 namespace，与 build_system_context / observe 使用的键一致
@@ -249,6 +251,11 @@ class MemoryService:
         if changed:
             self.store.save(snapshot)
             logger.info("memory_updated fields=%s", changed)
+            emit_audit_event(
+                "memory_updated",
+                actor="MemoryService",
+                payload={"fields": changed, "input_len": len(user_input)},
+            )
         return snapshot
 
     def get_user_profile(self) -> Dict[str, Any]:

@@ -20,8 +20,8 @@
 | ToolSpec / ToolResult / BaseTool / FunctionTool | `src/tools/base.py` | 工具描述、结果模型、抽象与函数适配 |
 | ToolRegistry | `src/tools/registry.py` | 注册、查询、导出 to_openai_tools() |
 | ToolExecutor / ToolExecution | `src/tools/executor.py` | 执行单次调用、解析参数、异常归一化、可选重试 |
-| ToolContext | `src/tools/context.py` | 执行时上下文（session_id、user_id、extra） |
-| bootstrap | `src/tools/bootstrap.py` | 全局 tool_registry、tool_executor、tool 装饰器 |
+| ToolContext / RequestContext | `src/tools/context.py` | 请求级上下文（request_id、trace_id、session_id、deadline、extra） |
+| bootstrap | `src/tools/bootstrap.py` | `create_tooling()` 显式创建 registry/executor；兼容 legacy 全局对象 |
 | builtin | `src/tools/builtin/` | 内置工具（basic、http 等） |
 
 ---
@@ -38,8 +38,8 @@
 ## 4. ToolRegistry
 
 - **register(tool)**：注册 BaseTool；重名抛 ValueError。
-- **register_function(name, description, parameters, func)**：构造 FunctionTool 并注册。
-- **tool(name?, description, parameters)**：装饰器，等价于 register_function。
+- **register_function(name, description, parameters, idempotent, func)**：构造 FunctionTool 并注册。
+- **tool(name?, description, parameters, idempotent)**：装饰器，等价于 register_function。
 - **get(name)**、**has(name)**、**list_tools()**：查询。
 - **to_openai_tools()**：返回所有工具的 OpenAI schema 列表，供 LLMGateway 使用。
 
@@ -52,20 +52,20 @@
   - 工具不存在：返回 ok=False、error="工具不存在: name"。
   - 存在：调用 BaseTool.execute，捕获异常为 ToolResult(ok=False, error=...)。
   - 可选：对网络类/可重试错误做有限次数重试；非幂等工具默认不自动重试（可由元数据标记）。
-- **execute_tool_call(tool_call, context?) -> ToolExecution**：从 LLM tool_call 解析 name 与 JSON arguments，委托 execute。
+- **execute_tool_call(tool_call, context?) -> ToolExecution**：解析 name 与 JSON arguments；参数非法时返回失败结果，不中断主链路。
 
 ---
 
 ## 6. ToolContext
 
-- 字段：session_id、user_id、extra。供需要会话/用户信息的工具使用；由 FunctionTool 按签名注入。
+- 字段：`request_id`、`trace_id`、`session_id`、`user_id`、`deadline_ts`、`cancelled`、`extra`；供工具与执行器做链路日志、审计和超时控制。
 
 ---
 
 ## 7. 内置工具
 
-- **basic**：get_current_time（装饰器）、add_numbers（显式注册）。
-- **http**：http_get、http_post_json；参数 url/headers/timeout 等；响应长度裁剪；异常由 ToolExecutor 归一化。
+- **basic**：get_current_time、add_numbers（均显式注册，标记 idempotent）。
+- **http**：http_get（idempotent）、http_post_json（non-idempotent）；参数 url/headers/timeout 等；响应长度裁剪；异常由 ToolExecutor 归一化。
 - 安全与策略：当前可配置超时与长度上限；后续可增加域名白名单或可访问范围配置。
 
 ---
@@ -80,8 +80,8 @@
 ## 9. 新增工具步骤
 
 1. 在 `src/tools/builtin/` 新建模块或扩展现有模块。
-2. 实现函数，用 @tool(...) 或 register_function 注册。
-3. 确保模块在启动时被导入（如 builtin/__init__.py），无需改 Orchestrator。
+2. 实现函数，用 @tool(...) 或 register_function 注册，并明确 idempotent 元数据。
+3. 在 `builtin/__init__.py` 的 `register_builtin_tools(registry)` 中显式挂载，无需改 Orchestrator。
 
 ---
 

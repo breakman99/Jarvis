@@ -8,8 +8,8 @@
 
 - **抽象统一**：通过 `BaseAgent` 给所有 Agent 定义统一接口，便于扩展和编排。
 - **职责分离**：将“规划”和“执行/对话”角色拆分为不同 Agent，由协调器统一调度。
-- **可配置启用**：默认仍保持单 Orchestrator 模式，通过配置开关开启多 Agent。
-- **向后兼容**：不破坏原有 `AgentApp.chat(user_input)` 和 CLI 入口。
+- **统一路径**：默认采用 Coordinator + PlanningAgent + ConversationAgent，不再保留单 Orchestrator 路径。
+- **接口兼容**：保持 `AgentApp.chat(user_input)` 和 CLI 入口不变。
 
 ---
 
@@ -21,7 +21,7 @@
 | ConversationAgent | `src/agent/coordinator.py` | 通用对话/工具执行 Agent，内部复用 `AgentOrchestrator` |
 | PlanningAgent | `src/agent/coordinator.py` | 规划型 Agent，仅生成步骤列表，不执行工具 |
 | AgentCoordinator | `src/agent/coordinator.py` | 多 Agent 编排入口，负责驱动 PlanningAgent / ConversationAgent 协作 |
-| AgentApp / AgentAppConfig | `src/agent/app.py` | 通过配置决定使用 Orchestrator 还是 AgentCoordinator |
+| AgentApp / AgentAppConfig | `src/agent/app.py` | 统一装配 Coordinator 路径并透传 RequestContext |
 
 ---
 
@@ -47,9 +47,9 @@
   - 面向一般对话与工具调用场景。
   - 内部通过组合的方式复用 `AgentOrchestrator`，不重复实现 LLM+工具循环逻辑。
 - 关键点：
-  - 构造函数注入：`LLMGateway`、`ToolRegistry`、`ToolExecutor`、`AgentOrchestratorConfig`、`Planner`、`MemoryService`。
+  - 构造函数注入：`LLMGateway`、`ToolRegistry`、`ToolExecutor`、`AgentOrchestratorConfig`、`MemoryService`。
   - `run()` 直接委托给 `_orchestrator.run(user_input, context=context, session=session)`，共享上层传入的 `AgentSession`。
-  - `plan()` 默认使用 Orchestrator 中的 `Planner` 做简单步骤占位。
+  - `plan()` 默认不承担规划职责（返回空列表），规划统一由 `PlanningAgent` 承担。
 
 ---
 
@@ -133,34 +133,30 @@ sequenceDiagram
 
 ---
 
-## 7. AgentApp 与配置开关
+## 7. AgentApp 与配置
 
 位置：`src/agent/app.py`
 
-- `AgentAppConfig` 新增字段：
-  - `enable_multi_agent: bool`：是否启用多 Agent 模式。
+- `AgentAppConfig` 关键字段：
+  - `enable_planning: bool`：是否启用 `PlanningAgent` 预规划步骤。
 - 行为：
-  - 当 `enable_multi_agent` 为 **False**（默认）：
-    - `AgentApp` 构造一个单一 `AgentOrchestrator`，行为与早期版本兼容。
-  - 当 `enable_multi_agent` 为 **True**：
-    - 构造：
-      - 一个 `ConversationAgent`（内部持有 Orchestrator）。
-      - 可选一个 `PlanningAgent`（当 `enable_planner=True` 时）。
-      - 一个 `AgentCoordinator`，持有上述 Agent 与 `MemoryService`、`LLMGateway`、`ToolRegistry`、`ToolExecutor`。
-    - `AgentApp.chat()` 委托给 Coordinator 的 `run()`。
+  - `AgentApp` 始终构造：
+    - 一个 `ConversationAgent`（内部持有 Orchestrator）。
+    - 可选一个 `PlanningAgent`（当 `enable_planning=True` 时）。
+    - 一个 `AgentCoordinator`，持有上述 Agent 与 `MemoryService`、`LLMGateway`、`ToolRegistry`、`ToolExecutor`。
+  - `AgentApp.chat()` 委托给 Coordinator 的 `run()`。
 - 环境变量映射（见 `src/config.py`）：
-  - `JARVIS_ENABLE_MULTI_AGENT=true/false`
+  - `JARVIS_ENABLE_PLANNING=true/false`（兼容旧变量 `JARVIS_ENABLE_PLANNER`）
 
 ---
 
-## 8. 何时使用多 Agent 模式
+## 8. 何时开启规划
 
-- 建议开启多 Agent 的场景：
+- 建议开启 `enable_planning` 的场景：
   - 需要在回答前先给用户或系统一个清晰的步骤计划。
-  - 后续打算增加更多“专长 Agent”（如代码 Agent、搜索 Agent），由 Coordinator 统一调度。
-- 保持单 Agent 的场景：
+  - 上层需要展示步骤或审计规划输出。
+- 可关闭 `enable_planning` 的场景：
   - 任务简单、追求最低延迟。
-  - 希望行为尽量接近早期版本。
 
 ---
 

@@ -1,39 +1,47 @@
+"""
+Agent 应用壳与装配层。
+
+AgentApp 根据 AgentAppConfig 创建 LLMGateway、ToolRegistry/ToolExecutor、
+MemoryService（可选）以及 AgentCoordinator（含 ConversationAgent 与可选的 PlanningAgent），
+对外提供 chat(user_input) -> str。RequestContext 在此创建并透传至编排层。
+"""
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
 
-from ..config import AGENT_CONFIG, DEFAULT_PROVIDER
+from ..config import AGENT_CONFIG, DEFAULT_PROVIDER, validate_settings
 from ..engine import LLMGateway
-from ..tools import tool_executor, tool_registry
+from ..tools import create_tooling
+from ..tools.context import RequestContext
 from .coordinator import AgentCoordinator, ConversationAgent, PlanningAgent
 from .memory import FileMemoryStore, MemoryService, SQLiteMemoryStore
-from .orchestrator import AgentOrchestrator, AgentOrchestratorConfig
-from .planner import Planner
+from .orchestrator import AgentOrchestratorConfig
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class AgentAppConfig:
+    """Agent 应用配置：LLM 提供商、迭代上限、是否启用规划、记忆后端与路径。"""
     provider: str = DEFAULT_PROVIDER
     max_iterations: int = AGENT_CONFIG["max_iterations"]
-    enable_planner: bool = AGENT_CONFIG["enable_planner"]
+    enable_planning: bool = AGENT_CONFIG["enable_planning"]
     memory_backend: str = AGENT_CONFIG["memory_backend"]
     memory_file_path: str = AGENT_CONFIG["memory_file_path"]
     memory_db_path: str = AGENT_CONFIG["memory_db_path"]
-    enable_multi_agent: bool = bool(AGENT_CONFIG.get("enable_multi_agent", False))
 
 
 class AgentApp:
-    """装配 LLMGateway / Planner / Memory / Orchestrator 或 AgentCoordinator，对外提供 chat(user_input) -> str。"""
+    """统一装配入口：Coordinator + ConversationAgent + PlanningAgent。"""
 
     def __init__(self, config: AgentAppConfig | None = None):
+        validate_settings()
         self.config = config or AgentAppConfig()
 
         engine = LLMGateway(provider=self.config.provider)
-        planner = Planner(enabled=self.config.enable_planner)
         orchestrator_config = AgentOrchestratorConfig(max_iterations=self.config.max_iterations)
+        tool_registry, tool_executor = create_tooling(register_builtin=True)
         memory_service = None
         if self.config.memory_backend == "file":
             memory_service = MemoryService(
@@ -44,40 +52,33 @@ class AgentApp:
                 store=SQLiteMemoryStore(self.config.memory_db_path)
             )
 
-        if self.config.enable_multi_agent:
-            conv = ConversationAgent(
-                engine=engine,
-                tool_registry=tool_registry,
-                tool_executor=tool_executor,
-                config=orchestrator_config,
-                planner=planner,
-                memory_service=memory_service,
-            )
-            planning_agent = PlanningAgent(engine=engine) if self.config.enable_planner else None
-            self.agent = AgentCoordinator(
-                engine=engine,
-                tool_registry=tool_registry,
-                tool_executor=tool_executor,
-                agents=[conv],
-                memory_service=memory_service,
-                planning_agent=planning_agent,
-            )
-        else:
-            self.agent = AgentOrchestrator(
-                engine=engine,
-                tool_registry=tool_registry,
-                tool_executor=tool_executor,
-                planner=planner,
-                config=orchestrator_config,
-                memory_service=memory_service,
-            )
+        conv = ConversationAgent(
+            engine=engine,
+            tool_registry=tool_registry,
+            tool_executor=tool_executor,
+            config=orchestrator_config,
+            memory_service=memory_service,
+        )
+        planning_agent = PlanningAgent(engine=engine) if self.config.enable_planning else None
+        self.agent = AgentCoordinator(
+            engine=engine,
+            tool_registry=tool_registry,
+            tool_executor=tool_executor,
+            agents=[conv],
+            memory_service=memory_service,
+            planning_agent=planning_agent,
+        )
 
     def chat(self, user_input: str) -> str:
-        response = self.agent.run(user_input)
+        """处理一次用户输入：创建 RequestContext，委托 Coordinator 执行，返回最终文本。"""
+        context = RequestContext.create()
+        response = self.agent.run(user_input, context=context)
         logger.info(
-            "chat finished content_len=%s phase_log=%s",
+            "event=chat_finished content_len=%s phase_log=%s request_id=%s trace_id=%s",
             len(response.content),
             response.metadata.get("phase_log"),
+            context.request_id,
+            context.trace_id,
         )
         return response.content
 

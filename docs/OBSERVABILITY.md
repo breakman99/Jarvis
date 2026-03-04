@@ -1,10 +1,19 @@
 # 可观测性：日志分层与打点
 
-> 使用 Python 标准库 `logging`，在关键路径打点，便于调试与后续接入结构化日志或外部监控。
+> 使用 Python 标准库 `logging` 在关键路径打点，并配合 `src/observability` 下的 **metrics**（计数/直方图）与 **audit**（审计事件），便于调试与后续接入结构化日志或外部监控。
 
 ---
 
-## 1. 日志配置
+## 1. 模块与职责
+
+| 模块 | 路径 | 职责 |
+|------|------|------|
+| metrics | `src/observability/metrics.py` | 进程内指标收集器：`inc(name, labels)` 计数、`observe(name, value, labels)` 直方图；供 LLMGateway、ToolExecutor、Orchestrator 等打点；`snapshot()` 可导出当前计数与直方图。 |
+| audit | `src/observability/audit.py` | 审计事件：`emit_audit_event(event_type, actor=..., context=..., payload=..., status=...)`；与 RequestContext 结合输出 request_id/trace_id；用于 memory_updated、tool_execution 等关键操作。 |
+
+---
+
+## 2. 日志配置
 
 - **配置位置**：在 `src/main.py` 顶部通过 `logging.basicConfig` 统一配置（REPL 启动时生效）。
 - **格式**：`[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s`
@@ -14,9 +23,9 @@
 
 ---
 
-## 2. 分层打点策略
+## 3. 分层打点策略
 
-### 2.1 CLI / AgentApp 层
+### 3.1 CLI / AgentApp 层
 
 | 位置 | 级别 | 关键字段 / 内容 |
 |------|------|-----------------|
@@ -25,7 +34,7 @@
 
 不记录完整用户输入或回复，仅摘要与长度，避免敏感信息写入日志。
 
-### 2.2 Orchestrator 层
+### 3.2 Orchestrator 层
 
 | 位置 | 级别 | 关键字段 / 内容 |
 |------|------|-----------------|
@@ -35,7 +44,7 @@
 | 正常结束 | INFO | `finished_with=success` |
 | 达到迭代上限 | INFO | `finished_with=max_iterations` |
 
-### 2.3 Tool 层（ToolExecutor）
+### 3.3 Tool 层（ToolExecutor）
 
 | 位置 | 级别 | 关键字段 / 内容 |
 |------|------|-----------------|
@@ -44,7 +53,7 @@
 | 工具不存在 | ERROR | `tool_not_found`、`tool_name` |
 | 执行过程异常 | ERROR | `tool_exec_exception`、`tool_name`、`exception` |
 
-### 2.4 LLM 网关层（LLMGateway）
+### 3.4 LLM 网关层（LLMGateway）
 
 | 位置 | 级别 | 关键字段 / 内容 |
 |------|------|-----------------|
@@ -53,7 +62,7 @@
 
 不记录 API Key 或完整 message 内容。
 
-### 2.5 Memory 层
+### 3.5 Memory 层
 
 | 位置 | 级别 | 关键字段 / 内容 |
 |------|------|-----------------|
@@ -61,7 +70,7 @@
 
 ---
 
-## 3. 使用与扩展
+## 4. 使用与扩展
 
 - **本地调试**：将 `src.agent.orchestrator` 的 level 设为 `DEBUG` 可看到每轮迭代的 message 数量。
 - **结构化日志**：后续可将 `logging` 的 Formatter 替换为输出 JSON 的 handler，便于接入 ELK、Datadog 等。

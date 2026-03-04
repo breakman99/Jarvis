@@ -19,13 +19,15 @@
 
 ```bash
 .
-├── agent.py               # 顶层启动脚本
+├── agent.py               # 顶层启动脚本（转发至 src.main.main）
 ├── src/
 │   ├── main.py            # CLI REPL 入口
-│   ├── config.py          # 模型与 Agent 配置
-│   ├── engine/            # LLMGateway
-│   ├── agent/             # App / Coordinator / Session / Planner / Memory / BaseAgent
-│   └── tools/             # Tool 框架与内置工具
+│   ├── config.py          # 模型、Agent、记忆、工具与 LLM 配置
+│   ├── common/            # 公共错误类型（TransientError / TimeoutError / CancelledError 等）
+│   ├── engine/            # LLMGateway 与 LLMReply / LLMEngineProtocol 类型
+│   ├── observability/     # 可观测性：metrics（计数/直方图）、audit（审计事件）
+│   ├── agent/             # App / Coordinator / Orchestrator / Session / Memory / BaseAgent / Response
+│   └── tools/             # Tool 框架与内置工具（registry / executor / context / bootstrap / builtin）
 └── docs/                  # 架构与设计文档
 ```
 
@@ -35,7 +37,7 @@
 
 1. 用户在 CLI 输入（`src/main.py`）。
 2. `AgentApp.chat(user_input)` 装配并调用编排层。
-3. 编排层（Orchestrator 或 AgentCoordinator）：
+3. 编排层（统一为 `AgentCoordinator`）：
    - 更新长期记忆（MemoryService.observe_user_input）。
    - 将用户输入加入会话（AgentSession）。
    - 调用 LLMGateway.chat(messages, tools_schema) 获取模型决策。

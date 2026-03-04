@@ -6,12 +6,11 @@ from __future__ import annotations
 import logging
 from typing import Any, List, Optional
 
-from ..engine import LLMGateway
+from ..engine import LLMEngineProtocol
 from ..tools import ToolContext, ToolExecutor, ToolRegistry
 from .base_agent import BaseAgent
 from .memory import MemoryService
 from .orchestrator import AgentOrchestrator, AgentOrchestratorConfig
-from .planner import Planner
 from .response import AgentResponse
 from .session import AgentSession
 
@@ -23,11 +22,10 @@ class ConversationAgent(BaseAgent):
 
     def __init__(
         self,
-        engine: LLMGateway,
+        engine: LLMEngineProtocol,
         tool_registry: ToolRegistry,
         tool_executor: ToolExecutor,
         config: Optional[AgentOrchestratorConfig] = None,
-        planner: Optional[Planner] = None,
         memory_service: Optional[MemoryService] = None,
     ):
         self._orchestrator = AgentOrchestrator(
@@ -35,12 +33,12 @@ class ConversationAgent(BaseAgent):
             tool_registry=tool_registry,
             tool_executor=tool_executor,
             config=config or AgentOrchestratorConfig(),
-            planner=planner or Planner(enabled=False),
             memory_service=memory_service,
         )
 
     def plan(self, user_input: str, session: AgentSession) -> List[str]:
-        return self._orchestrator.planner.plan_steps(user_input)
+        _ = user_input, session
+        return []
 
     def run(
         self,
@@ -57,7 +55,7 @@ class PlanningAgent(BaseAgent):
 
     def __init__(
         self,
-        engine: LLMGateway,
+        engine: LLMEngineProtocol,
         system_prompt: str = "你是一个任务规划助手。根据用户输入，输出简洁的步骤列表，每行一步。不要执行工具，只输出规划。",
     ):
         self._engine = engine
@@ -70,7 +68,7 @@ class PlanningAgent(BaseAgent):
         ]
         try:
             response = self._engine.chat(messages, tools=None)
-            content = (response.choices[0].message.content or "").strip()
+            content = (response.content or "").strip()
             steps = [s.strip() for s in content.split("\n") if s.strip()]
             return steps[:20]
         except Exception as e:
@@ -101,7 +99,7 @@ class AgentCoordinator:
     def __init__(
         self,
         *,
-        engine: LLMGateway,
+        engine: LLMEngineProtocol,
         tool_registry: ToolRegistry,
         tool_executor: ToolExecutor,
         agents: List[BaseAgent],
@@ -118,6 +116,11 @@ class AgentCoordinator:
         self._planning_agent = planning_agent
 
     def run(self, user_input: str, *, context: Optional[ToolContext] = None) -> AgentResponse:
+        """
+        编排一次用户请求：更新记忆、构建带记忆的 session、可选调用 PlanningAgent.plan、
+        再委托 ConversationAgent.run 执行对话与工具调用，最后合并 steps 到响应。
+        """
+        active_context = context or ToolContext.create()
         if self.memory_service:
             self.memory_service.observe_user_input(user_input)
         prompt = self._system_prompt
@@ -130,7 +133,12 @@ class AgentCoordinator:
         steps: List[str] = []
         if self._planning_agent:
             steps = self._planning_agent.plan(user_input, session)
-            logger.info("coordinator planning_steps count=%s", len(steps))
+            logger.info(
+                "event=coordinator_planning_steps count=%s request_id=%s trace_id=%s",
+                len(steps),
+                active_context.request_id,
+                active_context.trace_id,
+            )
 
         conversation = self._agents.get("ConversationAgent")
         if not conversation:
@@ -141,7 +149,8 @@ class AgentCoordinator:
         if not conversation:
             raise ValueError("AgentCoordinator 需要至少一个 ConversationAgent")
 
-        response = conversation.run(user_input, context=context, session=session)
+        active_context.extra["memory_observed"] = True
+        response = conversation.run(user_input, context=active_context, session=session)
         if steps and not response.steps:
             response = AgentResponse(
                 content=response.content,
