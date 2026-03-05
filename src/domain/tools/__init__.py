@@ -1,8 +1,7 @@
-from .base import BaseTool, FunctionTool, ToolResult, ToolSpec
-from .context import ToolContext, RequestContext
-from .executor import ToolExecution, ToolExecutor
-from .factory import create_tooling, tool
+from .bootstrap import create_tooling, tool
 from .registry import ToolRegistry
+from .runtime import RequestContext, ToolContext, ToolExecution, ToolExecutor
+from .spec import BaseTool, FunctionTool, ToolResult, ToolSpec
 
 __all__ = [
     "BaseTool",
@@ -21,6 +20,7 @@ __all__ = [
 
 def __getattr__(name: str):
     if name in ("tool_registry", "tool_executor"):
-        from . import factory
+        from .bootstrap import factory
+
         return getattr(factory, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

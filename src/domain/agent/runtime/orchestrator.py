@@ -6,11 +6,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from src.domain.tools import ToolContext, ToolExecutor, ToolRegistry
+from src.domain.tools.registry.registry import ToolRegistry
+from src.domain.tools.runtime.context import ToolContext
+from src.domain.tools.runtime.executor import ToolExecutor
 from src.infrastructure.llm import LLMEngineProtocol
-from .agent_executor import LoopExecutor, LoopExecutorConfig, to_agent_response
-from .response import AgentResponse
-from .session import AgentSession
+from ..execution.loop_executor import LoopExecutor, LoopExecutorConfig, to_agent_response
+from ..models.response import AgentResponse
+from ..models.session import AgentSession
 from .tool_set import ToolSet
 
 DEFAULT_SYSTEM_PROMPT = "你是一个严谨的助手。请善用工具回答问题。"

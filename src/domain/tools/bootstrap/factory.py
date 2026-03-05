@@ -4,14 +4,14 @@
 分层说明：
 - 应用层通过 create_tooling(register_defaults=True) 得到 registry/executor 并注入 Agent。
 - 业务工具应继承 BaseTool 或使用 registry.register_function / registry.tool 注册。
-- 默认工具（时间、加法、HTTP）在 tools/defaults.py 中以 BaseTool 子类实现。
+- 默认工具（时间、加法、HTTP）在 tools/catalog/defaults.py 中以 BaseTool 子类实现。
 """
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional
 
-from .executor import ToolExecutor
-from .registry import ToolRegistry
+from ..registry.registry import ToolRegistry
+from ..runtime.executor import ToolExecutor
 
 _default_registry: Optional[ToolRegistry] = None
 _default_executor: Optional[ToolExecutor] = None
@@ -22,7 +22,7 @@ def create_tooling(*, register_defaults: bool = True) -> tuple[ToolRegistry, Too
     registry = ToolRegistry()
     executor = ToolExecutor(registry)
     if register_defaults:
-        from .defaults import register_default_tools
+        from ..catalog.defaults import register_default_tools
         register_default_tools(registry)
     return registry, executor
 

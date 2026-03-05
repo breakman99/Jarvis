@@ -15,9 +15,9 @@ from typing import Any, Dict, Optional
 from src.infrastructure.common import CancelledError, TimeoutError
 from src.infrastructure.llm.types import LLMToolCall
 from src.infrastructure.observability import emit_audit_event, metrics
-from .base import ToolResult
+from ..registry.registry import ToolRegistry
+from ..spec.base import ToolResult
 from .context import RequestContext, ToolContext
-from .registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 

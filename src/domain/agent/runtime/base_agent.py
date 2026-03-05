@@ -6,11 +6,11 @@ from __future__ import annotations
 from abc import ABC
 from typing import Any, List, Optional
 
-from .agent_executor import ExecutionResult, ExecutorProtocol, to_agent_response
-from .planner import PlannerProtocol
-from .response import AgentResponse
-from .role_config import AgentRoleConfig
-from .session import AgentSession
+from ..config.role import AgentRoleConfig
+from ..execution.loop_executor import ExecutionResult, ExecutorProtocol, to_agent_response
+from ..models.response import AgentResponse
+from ..models.session import AgentSession
+from ..planning.planner import PlannerProtocol
 from .tool_set import ToolSet
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.domain.tools import ToolRegistry
+from src.domain.tools.registry.registry import ToolRegistry
 
 
 class ToolSet:

@@ -5,12 +5,12 @@ from __future__ import annotations
 
 from typing import Optional
 
-from src.domain.tools import ToolContext
+from src.domain.tools.runtime.context import ToolContext
+from ..memory.service import MemoryService
+from ..models.response import AgentResponse
+from ..models.session import AgentSession
 from .base_agent import BaseAgent
-from .memory import MemoryService
-from .response import AgentResponse
 from .router import AgentRouter, DefaultRouter
-from .session import AgentSession
 
 
 class AgentCoordinator:

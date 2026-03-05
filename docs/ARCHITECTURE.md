@@ -49,14 +49,14 @@ flowchart TD
 
 ### 3.3 领域层（Domain）
 
-- **编排核心**：`src/domain/agent/coordinator.py` 中 `AgentCoordinator` 负责 memory 更新、agent 路由与会话管理；单 Agent 生命周期由 `BaseAgent` 模板方法驱动。
-- **会话**：`domain/agent/session.py` 中 `AgentSession` 管理 messages（append_user / append_assistant / append_assistant_tool_calls / append_tool_message）。
-- **规划**：`domain/agent/planner.py` 中 `PlannerProtocol` 抽象规划策略，默认实现 `LLMPlanner` / `NullPlanner`。
-- **执行**：`domain/agent/agent_executor.py` 中 `ExecutorProtocol` 抽象执行策略，默认实现 `LoopExecutor`。
-- **工厂**：`domain/agent/factory.py` 中 `AgentFactory` + `PlannerRegistry` + `ExecutorRegistry` 负责可插拔实例化。
-- **记忆**：`domain/agent/memory.py` 中 `MemoryService` 对外提供 build_system_context、observe_user_input；存储由 `BaseMemoryStore` 抽象，实现包括 File / SQLite。
-- **工具**：`domain/tools/base.py`（ToolSpec / BaseTool / FunctionTool / ToolResult）、`registry.py`（ToolRegistry）、`executor.py`（ToolExecutor）、`context.py`（RequestContext / ToolContext）；默认工具在 `domain/tools/defaults.py` 中以 BaseTool 子类实现，通过 `create_tooling(register_defaults=True)` 注册。
-- **响应**：`domain/agent/response.py` 中 `AgentResponse`（content / steps / metadata）。
+- **编排核心**：`src/domain/agent/runtime/coordinator.py` 中 `AgentCoordinator` 负责 memory 更新、agent 路由与会话管理；单 Agent 生命周期由 `BaseAgent` 模板方法驱动。
+- **会话**：`src/domain/agent/models/session.py` 中 `AgentSession` 管理 messages（append_user / append_assistant / append_assistant_tool_calls / append_tool_message）。
+- **规划**：`src/domain/agent/planning/planner.py` 中 `PlannerProtocol` 抽象规划策略，默认实现 `LLMPlanner` / `NullPlanner`。
+- **执行**：`src/domain/agent/execution/loop_executor.py` 中 `ExecutorProtocol` 抽象执行策略，默认实现 `LoopExecutor`。
+- **工厂**：`src/domain/agent/runtime/factory.py` 中 `AgentFactory` + `PlannerRegistry` + `ExecutorRegistry` 负责可插拔实例化。
+- **记忆**：`src/domain/agent/memory/service.py` 中 `MemoryService` 对外提供 build_system_context、observe_user_input；存储由 `BaseMemoryStore` 抽象，实现包括 File / SQLite。
+- **工具**：`src/domain/tools/spec/base.py`（ToolSpec / BaseTool / FunctionTool / ToolResult）、`src/domain/tools/registry/registry.py`（ToolRegistry）、`src/domain/tools/runtime/executor.py`（ToolExecutor）、`src/domain/tools/runtime/context.py`（RequestContext / ToolContext）；默认工具在 `src/domain/tools/catalog/defaults.py` 中实现，通过 `create_tooling(register_defaults=True)` 注册。
+- **响应**：`src/domain/agent/models/response.py` 中 `AgentResponse`（content / steps / metadata）。
 
 ### 3.4 基础设施层（Infrastructure）
 
@@ -126,7 +126,7 @@ sequenceDiagram
 
 ## 6. 扩展点
 
-- **新增工具**：继承 BaseTool 或使用 register_function 注册，框架默认工具见 `src/domain/tools/defaults.py`，无需改 Orchestrator 主循环。
+- **新增工具**：继承 BaseTool 或使用 register_function 注册，框架默认工具见 `src/domain/tools/catalog/defaults.py`，无需改 Orchestrator 主循环。
 - **记忆后端**：实现 `BaseMemoryStore`（如 SQLite/Redis）并注入 MemoryService。
 - **多 Agent**：引入 BaseAgent + AgentRoleConfig + AgentRouter，新增角色只需配置与注册，无需修改编排引擎。
 - **横切能力**：通过 `RequestContext` 贯通 `request_id/trace_id/deadline`；在 LLMGateway 与 ToolExecutor 统一做重试/超时/审计/指标；CLI 负责最终异常兜底与可读错误提示。

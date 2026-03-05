@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from typing import Callable
 
-from src.domain.tools import ToolExecutor, ToolRegistry
+from src.domain.tools.registry.registry import ToolRegistry
+from src.domain.tools.runtime.executor import ToolExecutor
 from src.infrastructure.llm import LLMEngineProtocol
-from .agent_executor import LoopExecutor, LoopExecutorConfig
+from ..config.role import AgentRoleConfig
+from ..execution.loop_executor import LoopExecutor, LoopExecutorConfig
+from ..planning.planner import DEFAULT_PLANNER_PROMPT, LLMPlanner, NullPlanner, PlannerProtocol
 from .base_agent import ConfigurableAgent
 from .orchestrator import AgentOrchestratorConfig
-from .planner import DEFAULT_PLANNER_PROMPT, LLMPlanner, NullPlanner, PlannerProtocol
-from .role_config import AgentRoleConfig
 from .tool_set import ToolSet
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
-from .base import BaseTool, FunctionTool, ToolSpec
+from ..spec.base import BaseTool, FunctionTool, ToolSpec
 
 
 class ToolRegistry:

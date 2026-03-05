@@ -9,7 +9,7 @@ import datetime
 import json
 from typing import Any, Dict, Optional
 
-from .base import BaseTool, ToolResult, ToolSpec
+from ..spec.base import BaseTool, ToolResult, ToolSpec
 
 # 单次 HTTP 响应最大保留字符数
 MAX_RESPONSE_CHARS = 8000

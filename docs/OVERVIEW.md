@@ -24,8 +24,8 @@
 │   ├── interface/         # 接口层：CLI 入口（cli.py）
 │   ├── application/       # 应用编排层：AgentApp（app.py）
 │   ├── domain/            # 领域层
-│   │   ├── agent/         # Coordinator / Factory / Planner / Executor / Session / Memory / BaseAgent
-│   │   └── tools/         # Tool 框架（base / registry / executor / context / factory / defaults）
+│   │   ├── agent/         # config / models / planning / execution / memory / runtime
+│   │   └── tools/         # spec / runtime / registry / catalog / bootstrap
 │   └── infrastructure/   # 基础设施：config、llm、common、observability
 └── docs/                  # 架构与设计文档
 ```

@@ -17,13 +17,13 @@
 
 | 组件 | 文件 | 职责 |
 |------|------|------|
-| AgentRoleConfig | `src/domain/agent/role_config.py` | 角色名、提示词、工具子集、策略类型 |
-| BaseAgent / ConfigurableAgent | `src/domain/agent/base_agent.py` | `plan -> execute -> response` 模板方法 |
-| PlannerProtocol | `src/domain/agent/planner.py` | 规划策略接口（`LLMPlanner` / `NullPlanner`） |
-| ExecutorProtocol | `src/domain/agent/agent_executor.py` | 执行策略接口（`LoopExecutor`） |
-| AgentFactory | `src/domain/agent/factory.py` | 根据角色配置创建 Agent 实例 |
-| AgentRouter | `src/domain/agent/router.py` | 按输入/上下文选择目标 Agent |
-| AgentCoordinator | `src/domain/agent/coordinator.py` | 管理 memory、route、session 与调度 |
+| AgentRoleConfig | `src/domain/agent/config/role.py` | 角色名、提示词、工具子集、策略类型 |
+| BaseAgent / ConfigurableAgent | `src/domain/agent/runtime/base_agent.py` | `plan -> execute -> response` 模板方法 |
+| PlannerProtocol | `src/domain/agent/planning/planner.py` | 规划策略接口（`LLMPlanner` / `NullPlanner`） |
+| ExecutorProtocol | `src/domain/agent/execution/loop_executor.py` | 执行策略接口（`LoopExecutor`） |
+| AgentFactory | `src/domain/agent/runtime/factory.py` | 根据角色配置创建 Agent 实例 |
+| AgentRouter | `src/domain/agent/runtime/router.py` | 按输入/上下文选择目标 Agent |
+| AgentCoordinator | `src/domain/agent/runtime/coordinator.py` | 管理 memory、route、session 与调度 |
 
 ---
 

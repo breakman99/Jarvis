@@ -4,12 +4,13 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from src.domain.tools import ToolContext, ToolExecutor
+from src.domain.tools.runtime.context import ToolContext
+from src.domain.tools.runtime.executor import ToolExecutor
 from src.infrastructure.llm import LLMEngineProtocol
 from src.infrastructure.observability import metrics
-from .response import AgentResponse
-from .session import AgentSession
-from .tool_set import ToolSet
+from ..models.response import AgentResponse
+from ..models.session import AgentSession
+from ..runtime.tool_set import ToolSet
 
 logger = logging.getLogger(__name__)
 

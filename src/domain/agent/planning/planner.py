@@ -3,9 +3,9 @@ from __future__ import annotations
 import logging
 from typing import Any, List, Protocol
 
-from src.domain.tools.context import ToolContext
+from src.domain.tools.runtime.context import ToolContext
 from src.infrastructure.llm import LLMEngineProtocol
-from .session import AgentSession
+from ..models.session import AgentSession
 
 logger = logging.getLogger(__name__)
 
