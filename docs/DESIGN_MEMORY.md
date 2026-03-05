@@ -52,7 +52,7 @@
 
 ## 6. MemoryService 高层 API
 
-- **build_system_context() -> str**：从当前存储加载快照，拼出可读的“已知用户记忆”文案（如用户名、偏好语言），供 Orchestrator 注入 system prompt。
+- **build_system_context() -> str**：从当前存储加载快照，拼出可读的“已知用户记忆”文案（如用户名、偏好语言），供 Agent 编排层注入 system prompt。
 - **observe_user_input(user_input) -> Dict**：依次执行各 Observer/规则，合并变更到内存快照并写回存储；返回当前快照或变更集。
 - **get_user_profile() / update_user_profile(...)**（可选）：对上层暴露结构化画像（user_name、preferred_language、timezone 等），内部仍通过 store get/set 实现。
 
@@ -68,9 +68,9 @@
 
 ## 8. 与 Agent 的协作点
 
-- **Orchestrator 初始化**：调用 build_system_context()，将返回值拼入 AgentSession 的 system_prompt。
-- **每次 run() 开始**：调用 observe_user_input(user_input)，再执行后续会话与 LLM 逻辑。
-- 多 Agent 场景下，MemoryService 由 Coordinator 持有，保证各 Agent 共享同一用户画像。
+- **Coordinator 初始化/每次请求开始**：调用 `observe_user_input(user_input)` 更新长期记忆，再使用 `build_system_context()` 构造带记忆的 system prompt。
+- **会话管理**：当复用 `AgentSession` 时，由 `AgentCoordinator` 负责刷新首条 system 消息，确保最新记忆上下文生效。
+- 多 Agent 场景下，`MemoryService` 由 `AgentCoordinator` 持有，保证各 Agent 共享同一用户画像。
 
 ---
 

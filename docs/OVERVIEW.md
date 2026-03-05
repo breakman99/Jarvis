@@ -26,7 +26,7 @@
 │   ├── common/            # 公共错误类型（TransientError / TimeoutError / CancelledError 等）
 │   ├── engine/            # LLMGateway 与 LLMReply / LLMEngineProtocol 类型
 │   ├── observability/     # 可观测性：metrics（计数/直方图）、audit（审计事件）
-│   ├── agent/             # App / Coordinator / Orchestrator / Session / Memory / BaseAgent / Response
+│   ├── agent/             # App / Factory / Coordinator / Planner / Executor / Session / Memory / BaseAgent
 │   └── tools/             # Tool 框架与内置工具（registry / executor / context / bootstrap / builtin）
 └── docs/                  # 架构与设计文档
 ```
@@ -36,13 +36,13 @@
 ## 3. 核心数据流
 
 1. 用户在 CLI 输入（`src/main.py`）。
-2. `AgentApp.chat(user_input)` 装配并调用编排层。
-3. 编排层（统一为 `AgentCoordinator`）：
-   - 更新长期记忆（MemoryService.observe_user_input）。
-   - 将用户输入加入会话（AgentSession）。
-   - 调用 LLMGateway.chat(messages, tools_schema) 获取模型决策。
-   - 若有 tool_calls，经 ToolExecutor 执行并写回 tool 消息，继续循环。
-4. 返回 `AgentResponse`，CLI 输出 `content`。
+2. `AgentApp.chat(user_input)` 基于配置通过 `AgentFactory` 装配默认 Agent，并调用 `AgentCoordinator.run()`。
+3. 编排层（`AgentCoordinator`）：
+   - 更新长期记忆（`MemoryService.observe_user_input`），并基于记忆构建 system prompt。
+   - 通过 `AgentRouter` 选择合适 `BaseAgent` 实例。
+   - 将请求交给 `BaseAgent` 模板方法：先执行规划策略（`PlannerProtocol`），再执行工具循环策略（`ExecutorProtocol`）。
+4. 执行层（默认 `LoopExecutor`）循环调用 `LLMGateway.chat(messages, tools_schema)`，必要时经 `ToolExecutor` 调用工具并写回 tool 消息，直到生成最终回答。
+5. 返回 `AgentResponse`，CLI 输出 `content`。
 
 详细分层与时序见 `docs/ARCHITECTURE.md`。
 
