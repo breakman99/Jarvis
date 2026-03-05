@@ -17,6 +17,14 @@ def _get_env(key: str, default: str = "") -> str:
     return os.environ.get(key, default).strip() or default
 
 
+def _split_csv_env(key: str, default: str = "") -> tuple[str, ...]:
+    """读取逗号分隔环境变量，输出规范化小写元组。"""
+    raw = _get_env(key, default)
+    if not raw:
+        return ()
+    return tuple(item.strip().lower() for item in raw.split(",") if item.strip())
+
+
 DEFAULT_PROVIDER = os.environ.get("JARVIS_DEFAULT_PROVIDER", "deepseek")
 
 # ---------- LLM 调用：重试与超时（基础设施层） ----------
@@ -33,9 +41,10 @@ AGENT_CONFIG = {
     "max_consecutive_tool_failures": int(
         os.environ.get("JARVIS_MAX_CONSECUTIVE_TOOL_FAILURES", "3")
     ),
-    "enable_session_trim": os.environ.get("JARVIS_ENABLE_SESSION_TRIM", "false").lower()
+    "enable_session_trim": os.environ.get("JARVIS_ENABLE_SESSION_TRIM", "true").lower()
     in ("true", "1", "yes"),
     "max_session_messages": int(os.environ.get("JARVIS_MAX_SESSION_MESSAGES", "80")),
+    "request_timeout_seconds": float(os.environ.get("JARVIS_REQUEST_TIMEOUT_SECONDS", "120")),
     "enable_planning": os.environ.get(
         "JARVIS_ENABLE_PLANNING",
         os.environ.get("JARVIS_ENABLE_PLANNER", "true"),
@@ -49,6 +58,8 @@ AGENT_CONFIG = {
 TOOL_CONFIG = {
     "max_retries": int(os.environ.get("JARVIS_TOOL_MAX_RETRIES", "2")),
     "retryable_errors": ("timeout", "connection", "5xx"),
+    "http_allow_hosts": _split_csv_env("JARVIS_HTTP_ALLOW_HOSTS", ""),
+    "http_deny_hosts": _split_csv_env("JARVIS_HTTP_DENY_HOSTS", ""),
 }
 
 
@@ -131,6 +142,8 @@ def collect_settings_errors() -> list[str]:
         errors.append("JARVIS_MAX_CONSECUTIVE_TOOL_FAILURES 必须大于 0")
     if settings.agent_config["max_session_messages"] <= 1:
         errors.append("JARVIS_MAX_SESSION_MESSAGES 必须大于 1")
+    if settings.agent_config["request_timeout_seconds"] <= 0:
+        errors.append("JARVIS_REQUEST_TIMEOUT_SECONDS 必须大于 0")
     if settings.tool_config["max_retries"] < 0:
         errors.append("JARVIS_TOOL_MAX_RETRIES 不能小于 0")
     return errors

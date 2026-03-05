@@ -73,6 +73,23 @@ class FakeLLMCaptureSystemPrompt:
         return LLMReply(content="ok", tool_calls=[])
 
 
+class FakeLLMCaptureContext:
+    """记录 RequestContext，验证超时与链路字段透传。"""
+
+    def __init__(self, provider: str = "deepseek") -> None:  # noqa: ARG002
+        self.deadline_values: list[float | None] = []
+        self.time_left_values: list[float | None] = []
+
+    def chat(self, messages, tools=None, context=None):  # noqa: ANN001, ANN201
+        _ = messages, tools
+        self.deadline_values.append(getattr(context, "deadline_ts", None))
+        if context is not None and hasattr(context, "time_left_seconds"):
+            self.time_left_values.append(context.time_left_seconds())
+        else:
+            self.time_left_values.append(None)
+        return LLMReply(content="ok", tool_calls=[])
+
+
 def test_agent_app_simple_answer(monkeypatch: pytest.MonkeyPatch) -> None:
     """验证 AgentApp 通过 LLM 直接给出答案的完整链路。"""
 
@@ -85,6 +102,27 @@ def test_agent_app_simple_answer(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "测试回答" in reply
 
 
+def test_agent_app_structured_chat_should_return_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(agent_app_module, "LLMGateway", FakeLLMNoTool)
+
+    app = agent_app_module.AgentApp(AgentAppConfig())
+    envelope = app.chat_structured("你好，结构化输出测试。")
+
+    assert "测试回答" in envelope.answer
+    assert envelope.version == "v1"
+    assert envelope.reason == "completed"
+    assert envelope.request_id
+    assert envelope.trace_id
+    assert envelope.session_id
+    assert envelope.tool_traces == []
+    assert envelope.tool_errors == []
+    assert envelope.metadata.get("request_id") == envelope.request_id
+    assert envelope.metadata.get("trace_id") == envelope.trace_id
+    as_dict = envelope.to_dict()
+    assert as_dict["answer"] == envelope.answer
+    assert as_dict["version"] == "v1"
+
+
 def test_agent_app_with_tool_call(monkeypatch: pytest.MonkeyPatch) -> None:
     """验证 Agent 能够通过工具完成一次简单计算（1 + 2 = 3）。"""
 
@@ -95,6 +133,39 @@ def test_agent_app_with_tool_call(monkeypatch: pytest.MonkeyPatch) -> None:
     reply = app.chat("请帮我计算 1 加 2 等于多少？")
 
     assert "3" in reply
+
+
+def test_agent_app_structured_chat_should_include_tool_traces(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(agent_app_module, "LLMGateway", FakeLLMWithAddNumbers)
+
+    app = agent_app_module.AgentApp(AgentAppConfig(enable_planning=False))
+    envelope = app.chat_structured("请帮我计算 1 加 2 等于多少？")
+
+    traces = envelope.metadata.get("tool_traces") or []
+    assert len(traces) == 1
+    assert traces[0].get("tool_name") == "add_numbers"
+    assert traces[0].get("ok") is True
+    assert envelope.reason == "completed"
+    assert len(envelope.tool_traces) == 1
+    assert envelope.tool_errors == []
+
+
+def test_agent_app_should_pass_request_timeout_to_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_llm = FakeLLMCaptureContext()
+    monkeypatch.setattr(agent_app_module, "LLMGateway", lambda provider: fake_llm)
+
+    app = agent_app_module.AgentApp(
+        AgentAppConfig(
+            enable_planning=False,
+            request_timeout_seconds=3,
+        )
+    )
+    app.chat("超时透传测试")
+
+    assert len(fake_llm.deadline_values) == 1
+    assert fake_llm.deadline_values[0] is not None
+    assert fake_llm.time_left_values[0] is not None
+    assert 0 < float(fake_llm.time_left_values[0]) <= 3
 
 
 def test_agent_app_should_keep_session_history(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -131,4 +202,3 @@ def test_agent_app_should_refresh_memory_context_on_reused_session(
 
     assert len(fake_llm.system_prompts) == 2
     assert "用户名字是 小明" in fake_llm.system_prompts[1]
-

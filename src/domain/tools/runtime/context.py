@@ -49,6 +49,12 @@ class RequestContext:
     def is_expired(self) -> bool:
         return self.deadline_ts is not None and time.time() >= self.deadline_ts
 
+    def time_left_seconds(self) -> Optional[float]:
+        """返回距截止时间剩余秒数；未设置 deadline 返回 None。"""
+        if self.deadline_ts is None:
+            return None
+        return max(0.0, self.deadline_ts - time.time())
+
     def should_stop(self) -> bool:
         return self.cancelled or self.is_expired()
 

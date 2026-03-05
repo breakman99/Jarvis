@@ -3,7 +3,17 @@ from __future__ import annotations
 from typing import Any
 
 from ...spec.base import BaseTool, ToolResult, ToolSpec
-from .common import ensure_requests, normalize_response_text
+from .common import (
+    ensure_requests,
+    normalize_response_text,
+    resolve_timeout,
+    validate_http_url_safety,
+)
+
+try:
+    from src.infrastructure.config import TOOL_CONFIG
+except ImportError:
+    TOOL_CONFIG = {}
 
 
 class HttpPostJsonTool(BaseTool):
@@ -39,15 +49,20 @@ class HttpPostJsonTool(BaseTool):
         )
 
     def execute(self, args: dict[str, Any], context: Any | None = None) -> ToolResult:
-        _ = context
         requests = ensure_requests()
         if requests is None:
             return ToolResult(ok=False, content="", error="未安装 requests，无法使用 http_post_json")
         url = args.get("url") or ""
+        url_error = validate_http_url_safety(
+            url,
+            allow_hosts=TOOL_CONFIG.get("http_allow_hosts"),
+            deny_hosts=TOOL_CONFIG.get("http_deny_hosts"),
+        )
+        if url_error:
+            return ToolResult(ok=False, content="", error=url_error)
         json_body = args.get("json_body") or {}
         headers = args.get("headers") or {}
-        timeout = args.get("timeout")
-        timeout = float(timeout) if timeout is not None else 15.0
+        timeout = resolve_timeout(args.get("timeout"), context, default_timeout=15.0)
         try:
             response = requests.post(url, json=json_body, headers=headers, timeout=timeout)
             response.raise_for_status()

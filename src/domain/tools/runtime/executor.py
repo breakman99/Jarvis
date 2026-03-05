@@ -26,6 +26,17 @@ try:
 except ImportError:
     TOOL_CONFIG = {"max_retries": 2}
 
+_SENSITIVE_KEYWORDS = (
+    "authorization",
+    "api_key",
+    "apikey",
+    "token",
+    "password",
+    "secret",
+    "cookie",
+    "set-cookie",
+)
+
 
 def _tool_error_retryable(exc: BaseException) -> bool:
     """工具执行异常是否可重试：超时、连接、5xx。"""
@@ -35,6 +46,87 @@ def _tool_error_retryable(exc: BaseException) -> bool:
     if "50" in msg or "502" in msg or "503" in msg or "504" in msg:
         return True
     return False
+
+
+def _is_sensitive_key(key: Any) -> bool:
+    key_s = str(key).lower()
+    return any(token in key_s for token in _SENSITIVE_KEYWORDS)
+
+
+def _redact_arguments_for_log(value: Any) -> Any:
+    if isinstance(value, dict):
+        out: Dict[str, Any] = {}
+        for key, item in value.items():
+            if _is_sensitive_key(key):
+                out[str(key)] = "***REDACTED***"
+            else:
+                out[str(key)] = _redact_arguments_for_log(item)
+        return out
+    if isinstance(value, list):
+        return [_redact_arguments_for_log(item) for item in value]
+    return value
+
+
+def _matches_json_type(value: Any, expected_type: Any) -> bool:
+    if isinstance(expected_type, list):
+        return any(_matches_json_type(value, item) for item in expected_type)
+    if expected_type == "string":
+        return isinstance(value, str)
+    if expected_type == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if expected_type == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected_type == "boolean":
+        return isinstance(value, bool)
+    if expected_type == "object":
+        return isinstance(value, dict)
+    if expected_type == "array":
+        return isinstance(value, list)
+    if expected_type == "null":
+        return value is None
+    return True
+
+
+def _validate_json_schema(value: Any, schema: Any, *, path: str = "args") -> Optional[str]:
+    """
+    轻量 JSON Schema 校验（覆盖 type/required/properties/items/additionalProperties/enum）。
+    """
+    if not isinstance(schema, dict):
+        return None
+    expected_type = schema.get("type")
+    if expected_type is not None and not _matches_json_type(value, expected_type):
+        return f"{path} 类型错误，期望 {expected_type}"
+    if "enum" in schema and value not in schema.get("enum", []):
+        return f"{path} 不在允许枚举中"
+    if isinstance(value, dict):
+        required = schema.get("required", [])
+        if isinstance(required, list):
+            for key in required:
+                if key not in value:
+                    return f"{path}.{key} 缺失必填参数"
+        properties = schema.get("properties", {})
+        additional = schema.get("additionalProperties", True)
+        for key, item in value.items():
+            key_path = f"{path}.{key}"
+            if isinstance(properties, dict) and key in properties:
+                err = _validate_json_schema(item, properties[key], path=key_path)
+                if err:
+                    return err
+                continue
+            if additional is False:
+                return f"{key_path} 非法参数"
+            if isinstance(additional, dict):
+                err = _validate_json_schema(item, additional, path=key_path)
+                if err:
+                    return err
+    if isinstance(value, list):
+        item_schema = schema.get("items")
+        if isinstance(item_schema, dict):
+            for idx, item in enumerate(value):
+                err = _validate_json_schema(item, item_schema, path=f"{path}[{idx}]")
+                if err:
+                    return err
+    return None
 
 
 @dataclass
@@ -79,7 +171,23 @@ class ToolExecutor:
                 tool_call_id=tool_call_id,
             )
 
-        args_summary = json.dumps(arguments, ensure_ascii=False)[:200]
+        schema_error = _validate_json_schema(arguments, tool.spec.parameters, path="args")
+        if schema_error:
+            logger.error(
+                "event=tool_args_schema_invalid tool_name=%s error=%s request_id=%s trace_id=%s",
+                tool_name,
+                schema_error,
+                context.request_id if context else "",
+                context.trace_id if context else "",
+            )
+            return ToolExecution(
+                tool_name=tool_name,
+                arguments=arguments,
+                result=ToolResult(ok=False, content="", error=f"工具参数校验失败: {schema_error}"),
+                tool_call_id=tool_call_id,
+            )
+
+        args_summary = json.dumps(_redact_arguments_for_log(arguments), ensure_ascii=False)[:200]
         last_exc: Optional[Exception] = None
         max_attempts = self._max_retries + 1 if tool.spec.idempotent else 1
         for attempt in range(self._max_retries + 1):

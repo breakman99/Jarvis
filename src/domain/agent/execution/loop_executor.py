@@ -71,6 +71,7 @@ class LoopExecutor:
             session.trim(max_messages=self._config.max_session_messages)
 
         phase_log: list[str] = []
+        tool_traces: list[dict[str, Any]] = []
         consecutive_tool_failures = 0
         metrics.inc("orchestrator_runs_total", labels={"mode": "shared"})
 
@@ -78,7 +79,11 @@ class LoopExecutor:
             if active_context.should_stop():
                 return ExecutionResult(
                     content="请求已取消或超时，任务已停止。",
-                    metadata={"reason": "deadline_or_cancelled", "phase_log": phase_log},
+                    metadata={
+                        "reason": "deadline_or_cancelled",
+                        "phase_log": phase_log,
+                        "tool_traces": tool_traces,
+                    },
                 )
             response = self._engine.chat(
                 session.messages,
@@ -96,6 +101,7 @@ class LoopExecutor:
                     content=content,
                     metadata={
                         "phase_log": phase_log,
+                        "tool_traces": tool_traces,
                         "request_id": active_context.request_id,
                         "trace_id": active_context.trace_id,
                     },
@@ -117,6 +123,15 @@ class LoopExecutor:
             for tool_call in response.tool_calls:
                 execution = self._tool_executor.execute_tool_call(tool_call, context=active_context)
                 session.append_tool_message(execution.to_tool_message())
+                tool_traces.append(
+                    {
+                        "tool_name": execution.tool_name,
+                        "tool_call_id": execution.tool_call_id or "",
+                        "ok": execution.result.ok,
+                        "error": execution.result.error or "",
+                        "retried": int(execution.result.metadata.get("_retried", 0)),
+                    }
+                )
                 if execution.result.ok:
                     consecutive_tool_failures = 0
                 else:
@@ -156,6 +171,7 @@ class LoopExecutor:
                         metadata={
                             "reason": "consecutive_tool_failures_finalized",
                             "phase_log": phase_log,
+                            "tool_traces": tool_traces,
                             "request_id": active_context.request_id,
                             "trace_id": active_context.trace_id,
                         },
@@ -164,7 +180,11 @@ class LoopExecutor:
 
         return ExecutionResult(
             content="达到最大任务循环次数, Agent 未能完成任务。",
-            metadata={"reason": "max_iterations_reached", "phase_log": phase_log},
+            metadata={
+                "reason": "max_iterations_reached",
+                "phase_log": phase_log,
+                "tool_traces": tool_traces,
+            },
         )
 
 

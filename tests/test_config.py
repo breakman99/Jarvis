@@ -50,3 +50,16 @@ def test_validate_settings_success(monkeypatch: pytest.MonkeyPatch) -> None:
     config = _reload_config_module()
     config.validate_settings()
 
+
+def test_tool_http_host_rules_should_load_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JARVIS_PROVIDERS", "deepseek")
+    monkeypatch.setenv("JARVIS_DEFAULT_PROVIDER", "deepseek")
+    monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+    monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-chat")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "dummy")
+    monkeypatch.setenv("JARVIS_HTTP_ALLOW_HOSTS", "api.example.com, *.example.org")
+    monkeypatch.setenv("JARVIS_HTTP_DENY_HOSTS", "blocked.example.com")
+
+    config = _reload_config_module()
+    assert config.TOOL_CONFIG["http_allow_hosts"] == ("api.example.com", "*.example.org")
+    assert config.TOOL_CONFIG["http_deny_hosts"] == ("blocked.example.com",)

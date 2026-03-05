@@ -1,107 +1,90 @@
 # Tool 层设计
 
-> 统一管理可供 LLM 调用的工具：描述（Schema）、注册、执行与结果归一化；与 OpenAI function calling 对接。工具实现以继承 BaseTool 为主，并保留函数式注册（FunctionTool）便于快速扩展。
+> 工具层仅保留“继承 `BaseTool` 的类实现”这一种模式；所有工具通过 `registry.register(...)` 显式注册。
 
 ---
 
-## 1. 设计目标与约束
+## 1. 设计目标
 
-- 统一、可扩展的工具框架；新增工具不修改 Agent 编排代码。
-- 与 LLM function calling（OpenAI 风格）自然对接。
-- **实现方式**：推荐继承 BaseTool（Spec 与 execute 同处一类，便于维护）；简单场景可用 FunctionTool / register_function 做函数式注册。
-- 执行路径统一：参数解析、异常捕获、结果归一化为 ToolResult/ToolExecution；可选重试与幂等标记。
+- 工具对 LLM 暴露统一 schema，执行返回统一结果。
+- 新增工具不改编排主循环，仅新增类并注册。
+- 工具代码按业务语义分层，避免单文件堆叠和隐式注册。
 
 ---
 
-## 2. 目录与分层
+## 2. 分层结构
 
-```
+```text
 src/domain/tools/
-  base.py       # 抽象与类型：ToolSpec、ToolResult、BaseTool、FunctionTool
-  registry.py   # 注册表：ToolRegistry（register / register_function / tool 装饰器）
-  executor.py   # 执行器：ToolExecutor、ToolExecution
-  context.py    # 请求上下文：RequestContext（ToolContext）
-  factory.py    # 装配入口：create_tooling(register_defaults=True)
-  defaults.py   # 框架默认工具（BaseTool 子类）+ register_default_tools(registry)
+  spec/
+    base.py                 # ToolSpec / ToolResult / BaseTool
+  runtime/
+    context.py              # RequestContext / ToolContext
+    executor.py             # ToolExecutor / ToolExecution
+  registry/
+    registry.py             # ToolRegistry（仅 register/get/list/has）
+  catalog/
+    builtin/
+      get_current_time_tool.py
+      add_numbers_tool.py
+      http_get_tool.py
+      http_post_json_tool.py
+      common.py             # 内置 HTTP 工具共享逻辑
+    defaults.py             # DEFAULT_TOOL_CLASSES + register_default_tools
+  bootstrap/
+    factory.py              # create_tooling(register_defaults=True)
 ```
 
-| 组件 | 文件 | 职责 |
-|------|------|------|
-| ToolSpec / ToolResult / BaseTool / FunctionTool | `base.py` | 工具描述、结果模型、抽象基类与函数适配 |
-| ToolRegistry | `registry.py` | 注册、查询、导出 to_openai_tools() |
-| ToolExecutor / ToolExecution | `executor.py` | 执行单次调用、解析参数、异常归一化、可选重试 |
-| RequestContext（ToolContext） | `context.py` | 请求级上下文（request_id、trace_id、deadline 等） |
-| factory | `factory.py` | create_tooling() 创建 registry/executor；可选 register_defaults |
-| defaults | `defaults.py` | 框架默认工具（时间、加法、HTTP）以 BaseTool 子类实现；register_default_tools(registry) |
+---
+
+## 3. 核心组件
+
+- `ToolSpec`：工具名称、描述、参数 schema、幂等性标记。
+- `ToolResult`：工具执行结果，统一 `ok/content/error/metadata`。
+- `BaseTool`：工具抽象基类，所有业务工具必须继承。
+- `ToolRegistry`：只负责“类实例注册 + 查询 + schema 导出”。
+- `ToolExecutor`：参数解析、参数 schema 校验、执行、异常归一化、重试与可观测性打点。
+- `register_default_tools`：统一注册内置工具类，避免装配逻辑散落。
+
+补充约束：
+
+- 执行日志中的工具参数会做敏感字段脱敏（如 `authorization`、`token`、`api_key`）。
+- 内置 HTTP 工具包含基础 SSRF 防护：仅允许 `http/https`，默认拦截本地/内网地址，并支持 allowlist/denylist。
 
 ---
 
-## 3. BaseTool 与 FunctionTool
+## 4. 新增工具规范
 
-- **BaseTool**：抽象基类，持有 ToolSpec，实现 `execute(args, context?) -> ToolResult`。框架默认工具及业务复杂工具应继承此类，将 Spec 与逻辑放在同一类中。
-- **FunctionTool**：将普通函数适配为 BaseTool；参数从 args 映射，若函数签名含 context 则注入。若函数返回 `ToolResult` 则直接使用，否则包装为 `ToolResult(ok=True, content=str(result))`。
-- 工具“是什么”（Spec）与“如何执行”（execute）解耦，便于测试与替换。
+1. 新建一个继承 `BaseTool` 的类文件（建议“一类一文件”）。
+2. 在构造函数中声明 `ToolSpec`。
+3. 实现 `execute(args, context)`，返回 `ToolResult`。
+4. 在装配阶段调用 `registry.register(YourTool())`。
 
----
+示例：
 
-## 4. ToolRegistry
+```python
+from src.domain.tools.spec import BaseTool, ToolResult, ToolSpec
 
-- **register(tool)**：注册 BaseTool 实例；重名抛 ValueError。
-- **register_function(name, description, parameters, idempotent, func)**：构造 FunctionTool 并注册，用于函数式工具。
-- **tool(name?, description, parameters, idempotent)**：装饰器，等价于 register_function。
-- **get(name)**、**has(name)**、**list_tools()**：查询。
-- **to_openai_tools()**：返回所有已注册工具的 OpenAI schema 列表。
 
----
+class ExampleTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            ToolSpec(
+                name="example_tool",
+                description="示例工具",
+                parameters={"type": "object", "properties": {}},
+                idempotent=True,
+            )
+        )
 
-## 5. ToolExecutor 与 ToolExecution
-
-- **ToolExecution**：tool_name、arguments、result (ToolResult)、tool_call_id；to_tool_message() 转为 role=tool 消息。
-- **execute(tool_name, arguments, context?, tool_call_id?)**：查表、执行、归一化结果；工具不存在或异常均转为 ToolResult(ok=False)。
-- **execute_tool_call(tool_call, context?)**：解析 LLM 的 tool_call（name + JSON arguments），再调用 execute。
-- 重试：仅对 idempotent 工具做有限次数重试；可重试异常（超时、连接、5xx）由内部逻辑判定。
-
----
-
-## 6. 默认工具（defaults.py）
-
-框架提供的开箱即用工具，均为 BaseTool 子类：
-
-- **GetCurrentTimeTool**：获取当前本地时间（idempotent）。
-- **AddNumbersTool**：两数相加（idempotent）。
-- **HttpGetTool**：HTTP GET，响应截断（idempotent）；依赖 requests。
-- **HttpPostJsonTool**：HTTP POST JSON（non-idempotent）；依赖 requests。
-
-通过 `create_tooling(register_defaults=True)` 或显式调用 `register_default_tools(registry)` 注册。
+    def execute(self, args, context=None):
+        _ = args, context
+        return ToolResult(ok=True, content="ok")
+```
 
 ---
 
-## 7. 新增工具方式
+## 5. 当前约束
 
-**方式一：类实现（推荐）**
-
-1. 在业务侧或 `src/domain/tools/` 下新建模块。
-2. 定义类继承 BaseTool，在 `__init__` 中传入 ToolSpec，实现 `execute(args, context) -> ToolResult`。
-3. 在装配阶段 `registry.register(YourTool())`；若希望纳入“默认工具”，可在 `defaults.py` 中增加类并加入 `register_default_tools`。
-
-**方式二：函数式注册**
-
-1. 实现函数，参数与 ToolSpec.parameters 一致；可选接收 `context`。
-2. 使用 `registry.register_function(name=..., description=..., parameters=..., idempotent=..., func=...)` 或 `@registry.tool(...)` 注册。
-3. 若函数需返回失败语义，可直接返回 `ToolResult(ok=False, error="...")`，FunctionTool 会原样透传。
-
-无需改编排层或 Orchestrator 主循环。
-
----
-
-## 8. 错误与重试约定
-
-- **错误**：工具内异常由 Executor 转为 ToolResult(ok=False)；Agent 可见“工具执行失败: …”类内容。
-- **重试**：由 Executor 对 idempotent 工具在可重试异常下做有限重试；非幂等工具不自动重试。
-
----
-
-## 9. 测试与演进
-
-- 单测：ToolRegistry 注册/查询；ToolExecutor 对缺失工具、异常、重试行为；各 BaseTool 子类 execute 逻辑。
-- 演进：ToolResult 结构化 payload；工具级超时/权限；耗时与成本打点。
+- 不再支持 `FunctionTool`、`register_function`、`@registry.tool(...)`。
+- 工具注册仅允许显式类实例注册，确保可读性与可维护性。

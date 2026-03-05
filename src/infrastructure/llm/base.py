@@ -86,12 +86,17 @@ class LLMGateway:
                 raise TimeoutError("request deadline exceeded before llm call")
             start = time.perf_counter()
             try:
+                timeout_seconds = float(self._timeout_seconds)
+                if context:
+                    left = context.time_left_seconds()
+                    if left is not None:
+                        timeout_seconds = max(0.1, min(timeout_seconds, left))
                 out = self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
                     tools=tools,
                     tool_choice="auto" if tools else None,
-                    timeout=float(self._timeout_seconds),
+                    timeout=timeout_seconds,
                 )
                 latency_ms = (time.perf_counter() - start) * 1000
                 logger.info(

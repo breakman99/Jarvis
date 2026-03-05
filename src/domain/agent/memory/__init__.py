@@ -9,6 +9,7 @@ from .service import (
     MemoryService,
     NameObserver,
     SQLiteMemoryStore,
+    TimezoneObserver,
 )
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     "SQLiteMemoryStore",
     "NameObserver",
     "LanguageObserver",
+    "TimezoneObserver",
     "MemoryService",
 ]

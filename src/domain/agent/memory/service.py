@@ -18,6 +18,23 @@ logger = logging.getLogger(__name__)
 
 # 默认 namespace，与 build_system_context / observe 使用的键一致
 PROFILE_NAMESPACE = "profile"
+MAX_SYSTEM_PROMPT_VALUE_LEN = 80
+
+
+def _sanitize_prompt_value(value: Any) -> str:
+    """
+    将记忆值清洗为可安全拼接到 system prompt 的单行文本。
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = text.replace("\r", " ").replace("\n", " ")
+    text = text.replace("{", "(").replace("}", ")")
+    text = text.replace("`", "")
+    text = re.sub(r"\s+", " ", text)
+    if len(text) > MAX_SYSTEM_PROMPT_VALUE_LEN:
+        text = f"{text[:MAX_SYSTEM_PROMPT_VALUE_LEN]}..."
+    return text
 
 
 class MemoryObserver(Protocol):
@@ -207,6 +224,28 @@ class LanguageObserver:
         return changed
 
 
+class TimezoneObserver:
+    """从输入中抽取时区偏好。"""
+
+    def apply(self, snapshot: Dict[str, Any], user_input: str) -> List[str]:
+        profile = snapshot.setdefault(PROFILE_NAMESPACE, {})
+        patterns = [
+            r"(?:我的时区是|时区是)\s*([A-Za-z_/\-+0-9:]+)",
+            r"(?:my timezone is)\s*([A-Za-z_/\-+0-9:]+)",
+            r"\b(UTC[+-]\d{1,2}(?::\d{2})?)\b",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, user_input, flags=re.IGNORECASE)
+            if not match:
+                continue
+            timezone = match.group(1)
+            if profile.get("timezone") != timezone:
+                profile["timezone"] = timezone
+                return ["timezone"]
+            return []
+        return []
+
+
 # ---------- MemoryService ----------
 
 
@@ -221,7 +260,7 @@ class MemoryService:
 
     def __post_init__(self) -> None:
         if self.observers is None:
-            self.observers = [NameObserver(), LanguageObserver()]
+            self.observers = [NameObserver(), LanguageObserver(), TimezoneObserver()]
 
     def load_snapshot(self) -> Dict[str, Any]:
         return self.store.load()
@@ -229,9 +268,9 @@ class MemoryService:
     def build_system_context(self) -> str:
         snapshot = self.load_snapshot()
         profile = snapshot.get(PROFILE_NAMESPACE) or {}
-        user_name = profile.get("user_name")
-        preferred_language = profile.get("preferred_language")
-        timezone = profile.get("timezone")
+        user_name = _sanitize_prompt_value(profile.get("user_name"))
+        preferred_language = _sanitize_prompt_value(profile.get("preferred_language"))
+        timezone = _sanitize_prompt_value(profile.get("timezone"))
         parts = []
         if user_name:
             parts.append(f"用户名字是 {user_name}。")
@@ -248,13 +287,14 @@ class MemoryService:
         changed: List[str] = []
         for observer in self.observers:
             changed.extend(observer.apply(snapshot, user_input))
-        if changed:
+        deduped_changed = list(dict.fromkeys(changed))
+        if deduped_changed:
             self.store.save(snapshot)
-            logger.info("memory_updated fields=%s", changed)
+            logger.info("memory_updated fields=%s", deduped_changed)
             emit_audit_event(
                 "memory_updated",
                 actor="MemoryService",
-                payload={"fields": changed, "input_len": len(user_input)},
+                payload={"fields": deduped_changed, "input_len": len(user_input)},
             )
         return snapshot
 
