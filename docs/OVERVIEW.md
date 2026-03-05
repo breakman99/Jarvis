@@ -19,15 +19,14 @@
 
 ```bash
 .
-├── agent.py               # 顶层启动脚本（转发至 src.main.main）
+├── agent.py               # 顶层启动脚本（转发至 src.interface.cli.main）
 ├── src/
-│   ├── main.py            # CLI REPL 入口
-│   ├── config.py          # 模型、Agent、记忆、工具与 LLM 配置
-│   ├── common/            # 公共错误类型（TransientError / TimeoutError / CancelledError 等）
-│   ├── engine/            # LLMGateway 与 LLMReply / LLMEngineProtocol 类型
-│   ├── observability/     # 可观测性：metrics（计数/直方图）、audit（审计事件）
-│   ├── agent/             # App / Factory / Coordinator / Planner / Executor / Session / Memory / BaseAgent
-│   └── tools/             # Tool 框架与内置工具（registry / executor / context / bootstrap / builtin）
+│   ├── interface/         # 接口层：CLI 入口（cli.py）
+│   ├── application/       # 应用编排层：AgentApp（app.py）
+│   ├── domain/            # 领域层
+│   │   ├── agent/         # Coordinator / Factory / Planner / Executor / Session / Memory / BaseAgent
+│   │   └── tools/         # Tool 框架（base / registry / executor / context / factory / defaults）
+│   └── infrastructure/   # 基础设施：config、llm、common、observability
 └── docs/                  # 架构与设计文档
 ```
 
@@ -35,7 +34,7 @@
 
 ## 3. 核心数据流
 
-1. 用户在 CLI 输入（`src/main.py`）。
+1. 用户在 CLI 输入（`src/interface/cli.py`）。
 2. `AgentApp.chat(user_input)` 基于配置通过 `AgentFactory` 装配默认 Agent，并调用 `AgentCoordinator.run()`。
 3. 编排层（`AgentCoordinator`）：
    - 更新长期记忆（`MemoryService.observe_user_input`），并基于记忆构建 system prompt。

@@ -17,8 +17,8 @@
 
 | 组件 | 文件 | 职责 |
 |------|------|------|
-| LLMGateway | `src/engine/base.py` | 构造 OpenAI 兼容 client；chat() 带重试与超时 |
-| 配置 | `src/config.py` | `.env` 动态 provider 配置（`JARVIS_PROVIDERS` + `<PROVIDER>_*`）与 LLM 重试/超时参数 |
+| LLMGateway | `src/infrastructure/llm/base.py` | 构造 OpenAI 兼容 client；chat() 带重试与超时 |
+| 配置 | `src/infrastructure/config.py` | `.env` 动态 provider 配置（`JARVIS_PROVIDERS` + `<PROVIDER>_*`）与 LLM 重试/超时参数 |
 
 ---
 

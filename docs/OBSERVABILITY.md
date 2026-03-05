@@ -15,7 +15,7 @@
 
 ## 2. 日志配置
 
-- **配置位置**：在 `src/main.py` 顶部通过 `logging.basicConfig` 统一配置（REPL 启动时生效）。
+- **配置位置**：在 `src/interface/cli.py` 顶部通过 `logging.basicConfig` 统一配置（REPL 启动时生效）。
 - **格式**：`[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s`
 - **默认级别**：`INFO`；需要更细粒度时可将某 logger 设为 `DEBUG`（如 Orchestrator 的迭代详情）。
 

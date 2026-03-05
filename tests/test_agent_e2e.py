@@ -8,9 +8,9 @@ PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.agent import app as agent_app_module  # noqa: E402
-from src.agent.app import AgentAppConfig  # noqa: E402
-from src.engine import LLMReply, LLMToolCall  # noqa: E402
+import src.application.app as agent_app_module  # noqa: E402
+from src.application.app import AgentAppConfig  # noqa: E402
+from src.infrastructure.llm import LLMReply, LLMToolCall  # noqa: E402
 
 
 class FakeLLMNoTool:

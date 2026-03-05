@@ -29,7 +29,7 @@ flowchart TD
     loopExecutor --> llm[LLMGateway]
     loopExecutor --> executor[ToolExecutor]
     executor --> registry[ToolRegistry]
-    registry --> builtin[BuiltinTools]
+    registry --> defaults[DefaultTools]
 ```
 
 （当前实现已统一为 Coordinator 路径，不再保留 Planner 双轨。）
@@ -40,32 +40,31 @@ flowchart TD
 
 ### 3.1 接口层（Interface）
 
-- `agent.py`：顶层脚本，转发至 `src.main.main()`，便于通过 `python agent.py` 启动。
-- `src/main.py`：CLI REPL 入口；读取用户输入、调用 `AgentApp.chat()`、输出结果；对未捕获异常做友好提示并保持 REPL 不退出。
+- `agent.py`：顶层脚本，转发至 `src.interface.cli.main()`，便于通过 `python agent.py` 启动。
+- `src/interface/cli.py`：CLI REPL 入口；读取用户输入、调用 `AgentApp.chat()`、输出结果；对未捕获异常做友好提示并保持 REPL 不退出。
 
 ### 3.2 应用编排层（Application）
 
-- `src/agent/app.py`：`AgentApp` 依赖注入与装配（LLMGateway / MemoryService / AgentCoordinator）；对外 `chat(user_input) -> str`。`AgentAppConfig` 统一控制 provider、迭代上限、planning 开关、memory 后端与路径。
-- `src/agent/app.py`：`AgentApp` 现在在启动阶段显式装配 `ToolRegistry/ToolExecutor`（`create_tooling(register_builtin=True)`），不再依赖导入副作用注册工具。
+- `src/application/app.py`：`AgentApp` 依赖注入与装配（LLMGateway / MemoryService / AgentCoordinator）；对外 `chat(user_input) -> str`。`AgentAppConfig` 统一控制 provider、迭代上限、planning 开关、memory 后端与路径。启动阶段显式装配 `ToolRegistry/ToolExecutor`（`create_tooling(register_defaults=True)`）。
 
 ### 3.3 领域层（Domain）
 
-- **编排核心**：`coordinator.py` 中 `AgentCoordinator` 负责 memory 更新、agent 路由与会话管理；单 Agent 生命周期由 `BaseAgent` 模板方法驱动。
-- **会话**：`session.py` 中 `AgentSession` 管理 messages（append_user / append_assistant / append_assistant_tool_calls / append_tool_message）。
-- **规划**：`planner.py` 中 `PlannerProtocol` 抽象规划策略，默认实现 `LLMPlanner` / `NullPlanner`。
-- **执行**：`agent_executor.py` 中 `ExecutorProtocol` 抽象执行策略，默认实现 `LoopExecutor`。
-- **工厂**：`factory.py` 中 `AgentFactory` + `PlannerRegistry` + `ExecutorRegistry` 负责可插拔实例化。
-- **记忆**：`memory.py` 中 `MemoryService` 对外提供 build_system_context、observe_user_input；存储由 `BaseMemoryStore` 抽象，实现包括 File / SQLite。
-- **工具**：`tools/base.py`（ToolSpec / BaseTool / FunctionTool / ToolResult）、`registry.py`（ToolRegistry）、`executor.py`（ToolExecutor）、`context.py`（RequestContext / ToolContext）；builtin 通过 `create_tooling(register_builtin=True)` 在应用装配时注册。
-- **响应**：`response.py` 中 `AgentResponse`（content / steps / metadata）。
+- **编排核心**：`src/domain/agent/coordinator.py` 中 `AgentCoordinator` 负责 memory 更新、agent 路由与会话管理；单 Agent 生命周期由 `BaseAgent` 模板方法驱动。
+- **会话**：`domain/agent/session.py` 中 `AgentSession` 管理 messages（append_user / append_assistant / append_assistant_tool_calls / append_tool_message）。
+- **规划**：`domain/agent/planner.py` 中 `PlannerProtocol` 抽象规划策略，默认实现 `LLMPlanner` / `NullPlanner`。
+- **执行**：`domain/agent/agent_executor.py` 中 `ExecutorProtocol` 抽象执行策略，默认实现 `LoopExecutor`。
+- **工厂**：`domain/agent/factory.py` 中 `AgentFactory` + `PlannerRegistry` + `ExecutorRegistry` 负责可插拔实例化。
+- **记忆**：`domain/agent/memory.py` 中 `MemoryService` 对外提供 build_system_context、observe_user_input；存储由 `BaseMemoryStore` 抽象，实现包括 File / SQLite。
+- **工具**：`domain/tools/base.py`（ToolSpec / BaseTool / FunctionTool / ToolResult）、`registry.py`（ToolRegistry）、`executor.py`（ToolExecutor）、`context.py`（RequestContext / ToolContext）；默认工具在 `domain/tools/defaults.py` 中以 BaseTool 子类实现，通过 `create_tooling(register_defaults=True)` 注册。
+- **响应**：`domain/agent/response.py` 中 `AgentResponse`（content / steps / metadata）。
 
 ### 3.4 基础设施层（Infrastructure）
 
-- `src/engine/base.py`：`LLMGateway` 唯一 LLM 出入口；支持重试、超时与错误分类，并将 provider 原生响应适配为统一 `LLMReply` DTO。
-- `src/engine/types.py`：`LLMReply`、`LLMToolCall`、`LLMEngineProtocol` 等类型定义，供 Gateway 与编排层使用。
-- `src/config.py`：基于 `.env` 的模型配置加载（`JARVIS_PROVIDERS`、`JARVIS_DEFAULT_PROVIDER`、`<PROVIDER>_{BASE_URL,API_KEY,MODEL}`）及 Agent / 记忆 / 工具 / LLM 配置（含重试与 memory 后端/路径）。
-- `src/common/errors.py`：统一错误类型（`JarvisError`、`TransientError`、`PermanentError`、`TimeoutError`、`CancelledError`），供 LLM 与工具层重试与上层兜底。
-- `src/observability/`：可观测性能力；`metrics` 提供进程内计数与直方图打点，`audit` 提供审计事件（如 memory_updated、tool_execution），与日志配合使用，详见 `docs/OBSERVABILITY.md`。
+- `src/infrastructure/llm/base.py`：`LLMGateway` 唯一 LLM 出入口；支持重试、超时与错误分类，并将 provider 原生响应适配为统一 `LLMReply` DTO。
+- `src/infrastructure/llm/types.py`：`LLMReply`、`LLMToolCall`、`LLMEngineProtocol` 等类型定义，供 Gateway 与编排层使用。
+- `src/infrastructure/config.py`：基于 `.env` 的模型配置加载（`JARVIS_PROVIDERS`、`JARVIS_DEFAULT_PROVIDER`、`<PROVIDER>_{BASE_URL,API_KEY,MODEL}`）及 Agent / 记忆 / 工具 / LLM 配置（含重试与 memory 后端/路径）。
+- `src/infrastructure/common/errors.py`：统一错误类型（`JarvisError`、`TransientError`、`PermanentError`、`TimeoutError`、`CancelledError`），供 LLM 与工具层重试与上层兜底。
+- `src/infrastructure/observability/`：可观测性能力；`metrics` 提供进程内计数与直方图打点，`audit` 提供审计事件（如 memory_updated、tool_execution），与日志配合使用，详见 `docs/OBSERVABILITY.md`。
 
 ---
 
@@ -127,7 +126,7 @@ sequenceDiagram
 
 ## 6. 扩展点
 
-- **新增工具**：在 `src/tools/builtin/` 实现并注册，无需改 Orchestrator 主循环。
+- **新增工具**：继承 BaseTool 或使用 register_function 注册，框架默认工具见 `src/domain/tools/defaults.py`，无需改 Orchestrator 主循环。
 - **记忆后端**：实现 `BaseMemoryStore`（如 SQLite/Redis）并注入 MemoryService。
 - **多 Agent**：引入 BaseAgent + AgentRoleConfig + AgentRouter，新增角色只需配置与注册，无需修改编排引擎。
 - **横切能力**：通过 `RequestContext` 贯通 `request_id/trace_id/deadline`；在 LLMGateway 与 ToolExecutor 统一做重试/超时/审计/指标；CLI 负责最终异常兜底与可读错误提示。

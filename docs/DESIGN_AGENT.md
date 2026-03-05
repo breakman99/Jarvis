@@ -17,14 +17,14 @@
 
 | 组件 | 文件 | 职责 |
 |------|------|------|
-| AgentApp / AgentAppConfig | `src/agent/app.py` | 启动装配，创建 Factory、Coordinator、Memory |
-| AgentFactory | `src/agent/factory.py` | 基于 `AgentRoleConfig` 实例化 `ConfigurableAgent` |
-| AgentCoordinator | `src/agent/coordinator.py` | 记忆更新、路由决策、会话管理、请求编排 |
-| BaseAgent / ConfigurableAgent | `src/agent/base_agent.py` | 模板方法驱动单 Agent 生命周期 |
-| PlannerProtocol / LLMPlanner / NullPlanner | `src/agent/planner.py` | 可插拔规划策略 |
-| ExecutorProtocol / LoopExecutor | `src/agent/agent_executor.py` | 可插拔执行策略 |
-| AgentSession | `src/agent/session.py` | 管理对话消息 |
-| AgentResponse | `src/agent/response.py` | 标准化输出 |
+| AgentApp / AgentAppConfig | `src/application/app.py` | 启动装配，创建 Factory、Coordinator、Memory |
+| AgentFactory | `src/domain/agent/factory.py` | 基于 `AgentRoleConfig` 实例化 `ConfigurableAgent` |
+| AgentCoordinator | `src/domain/agent/coordinator.py` | 记忆更新、路由决策、会话管理、请求编排 |
+| BaseAgent / ConfigurableAgent | `src/domain/agent/base_agent.py` | 模板方法驱动单 Agent 生命周期 |
+| PlannerProtocol / LLMPlanner / NullPlanner | `src/domain/agent/planner.py` | 可插拔规划策略 |
+| ExecutorProtocol / LoopExecutor | `src/domain/agent/agent_executor.py` | 可插拔执行策略 |
+| AgentSession | `src/domain/agent/session.py` | 管理对话消息 |
+| AgentResponse | `src/domain/agent/response.py` | 标准化输出 |
 
 ---
 

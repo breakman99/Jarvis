@@ -17,7 +17,7 @@
 
 | 组件 | 文件 | 职责 |
 |------|------|------|
-| BaseMemoryStore | `src/agent/memory.py` | 存储抽象：get/set/query（或 load/save 兼容） |
+| BaseMemoryStore | `src/domain/agent/memory.py` | 存储抽象：get/set/query（或 load/save 兼容） |
 | FileMemoryStore | 同上 | 基于 JSON 文件的实现（namespace+key 或兼容结构） |
 | SQLiteMemoryStore | 同上 | 基于 SQLite 的实现（默认）；表结构 memory_items 等 |
 | MemoryService | 同上 | 高层 API：build_system_context、observe_user_input、get_user_profile 等 |

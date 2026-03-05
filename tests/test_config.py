@@ -10,7 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 
 def _reload_config_module():
-    import src.config as config_module
+    import src.infrastructure.config as config_module
 
     return importlib.reload(config_module)
 

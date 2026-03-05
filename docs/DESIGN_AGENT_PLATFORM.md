@@ -23,7 +23,7 @@ flowchart TD
 
 ## 2. BaseAgent：模板方法
 
-- 文件：`src/agent/base_agent.py`
+- 文件：`src/domain/agent/base_agent.py`
 - 关键点：
   - **配置**：持有 `AgentRoleConfig`（name、system_prompt、tool_names、planner_type、executor_type 等）。
   - **模板方法**：`run(user_input, context, session)`：
@@ -39,7 +39,7 @@ flowchart TD
 
 ### 3.1 PlannerProtocol
 
-- 文件：`src/agent/planner.py`
+- 文件：`src/domain/agent/planner.py`
 - 接口：
   - `plan(user_input, *, session, context) -> list[str]`
 - 默认实现：
@@ -48,7 +48,7 @@ flowchart TD
 
 ### 3.2 ExecutorProtocol / LoopExecutor
 
-- 文件：`src/agent/agent_executor.py`
+- 文件：`src/domain/agent/agent_executor.py`
 - 接口：
   - `execute(user_input, *, tools: ToolSet, session, context, steps) -> ExecutionResult`
 - 默认实现：
@@ -62,7 +62,7 @@ flowchart TD
 
 ## 4. AgentRoleConfig：声明式角色
 
-- 文件：`src/agent/role_config.py`
+- 文件：`src/domain/agent/role_config.py`
 - 字段示例：
   - `name`: `"default"` / `"planner"` / `"researcher"` 等。
   - `system_prompt`: 角色系统提示词。
@@ -84,7 +84,7 @@ flowchart TD
 
 ## 5. AgentFactory：装配中心
 
-- 文件：`src/agent/factory.py`
+- 文件：`src/domain/agent/factory.py`
 - 职责：
   - 持有 `PlannerRegistry` 与 `ExecutorRegistry`，根据 `planner_type` / `executor_type` 创建对应策略实例。
   - 基于 `ToolRegistry` + `tool_names` 生成 `ToolSet` 视图。
@@ -103,7 +103,7 @@ flowchart TD
 
 ## 6. AgentRouter 与多 Agent 编排
 
-- 文件：`src/agent/router.py`、`src/agent/coordinator.py`
+- 文件：`src/domain/agent/router.py`、`src/domain/agent/coordinator.py`
 - 默认实现：
   - `DefaultRouter`：始终路由到配置中的默认 Agent 名称。
 - 可扩展实现：

@@ -5,13 +5,13 @@ PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.agent.orchestrator import AgentOrchestrator, AgentOrchestratorConfig  # noqa: E402
-from src.agent.planner import LLMPlanner  # noqa: E402
-from src.agent.session import AgentSession  # noqa: E402
-from src.engine import LLMReply, LLMToolCall  # noqa: E402
-from src.tools.context import RequestContext  # noqa: E402
-from src.tools.executor import ToolExecutor  # noqa: E402
-from src.tools.registry import ToolRegistry  # noqa: E402
+from src.domain.agent.orchestrator import AgentOrchestrator, AgentOrchestratorConfig  # noqa: E402
+from src.domain.agent.planner import LLMPlanner  # noqa: E402
+from src.domain.agent.session import AgentSession  # noqa: E402
+from src.infrastructure.llm import LLMReply, LLMToolCall  # noqa: E402
+from src.domain.tools.context import RequestContext  # noqa: E402
+from src.domain.tools.executor import ToolExecutor  # noqa: E402
+from src.domain.tools.registry import ToolRegistry  # noqa: E402
 
 
 class _FailOnceTool:
@@ -28,7 +28,7 @@ class _FailOnceTool:
         self.calls += 1
         if self.calls == 1:
             raise RuntimeError("connection reset by peer")
-        from src.tools.base import ToolResult
+        from src.domain.tools.base import ToolResult
 
         return ToolResult(ok=True, content="ok")
 
