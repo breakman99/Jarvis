@@ -1,15 +1,14 @@
 """
-工具层基础类型：ToolSpec（描述）、ToolResult（执行结果）、BaseTool / FunctionTool（实现）。
+工具层基础类型：ToolSpec（描述）、ToolResult（执行结果）、BaseTool（实现）。
 
 与 OpenAI function calling 对接：ToolSpec.to_openai_schema() 产出 type/function 结构；
 ToolResult.to_message_content() 产出供 role=tool 的 content 文本。
 """
 from __future__ import annotations
 
-import inspect
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 
 
 @dataclass(frozen=True)
@@ -59,20 +58,3 @@ class BaseTool(ABC):
     @abstractmethod
     def execute(self, args: Dict[str, Any], context: Optional[Any] = None) -> ToolResult:
         raise NotImplementedError
-
-
-class FunctionTool(BaseTool):
-    """将 Python 函数适配为 BaseTool：参数从 args 映射，若函数签名含 context 则注入。"""
-    def __init__(self, spec: ToolSpec, func: Callable[..., Any]):
-        super().__init__(spec)
-        self._func = func
-        self._signature = inspect.signature(func)
-
-    def execute(self, args: Dict[str, Any], context: Optional[Any] = None) -> ToolResult:
-        kwargs = dict(args)
-        if "context" in self._signature.parameters:
-            kwargs["context"] = context
-        result = self._func(**kwargs)
-        if isinstance(result, ToolResult):
-            return result
-        return ToolResult(ok=True, content=str(result))

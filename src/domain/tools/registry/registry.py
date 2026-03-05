@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from ..spec.base import BaseTool, FunctionTool, ToolSpec
+from ..spec.base import BaseTool
 
 
 class ToolRegistry:
@@ -21,47 +21,6 @@ class ToolRegistry:
         if tool.name in self._tools:
             raise ValueError(f"工具已存在: {tool.name}")
         self._tools[tool.name] = tool
-
-    def register_function(
-        self,
-        *,
-        name: str,
-        description: str,
-        parameters: Dict[str, Any],
-        idempotent: bool = False,
-        func: Callable[..., Any],
-    ) -> BaseTool:
-        tool = FunctionTool(
-            spec=ToolSpec(
-                name=name,
-                description=description,
-                parameters=parameters,
-                idempotent=idempotent,
-            ),
-            func=func,
-        )
-        self.register(tool)
-        return tool
-
-    def tool(
-        self,
-        *,
-        name: Optional[str] = None,
-        description: str,
-        parameters: Dict[str, Any],
-        idempotent: bool = False,
-    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-            self.register_function(
-                name=name or func.__name__,
-                description=description,
-                parameters=parameters,
-                idempotent=idempotent,
-                func=func,
-            )
-            return func
-
-        return decorator
 
     def get(self, name: str) -> Optional[BaseTool]:
         return self._tools.get(name)

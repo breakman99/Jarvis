@@ -3,12 +3,12 @@
 
 分层说明：
 - 应用层通过 create_tooling(register_defaults=True) 得到 registry/executor 并注入 Agent。
-- 业务工具应继承 BaseTool 或使用 registry.register_function / registry.tool 注册。
+- 业务工具应继承 BaseTool，并通过 registry.register(...) 显式注册。
 - 默认工具（时间、加法、HTTP）在 tools/catalog/defaults.py 中以 BaseTool 子类实现。
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Optional
 
 from ..registry.registry import ToolRegistry
 from ..runtime.executor import ToolExecutor
@@ -48,19 +48,3 @@ def __getattr__(name: str) -> Any:
     if name == "tool_executor":
         return _get_default_executor()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-def tool(
-    *,
-    name: Optional[str] = None,
-    description: str,
-    parameters: Dict[str, Any],
-    idempotent: bool = False,
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """函数式注册工具的装饰器，使用默认 registry（懒加载）。业务侧建议通过 create_tooling() 拿到 registry 后使用 registry.tool(...)。"""
-    return _get_default_registry().tool(
-        name=name,
-        description=description,
-        parameters=parameters,
-        idempotent=idempotent,
-    )
