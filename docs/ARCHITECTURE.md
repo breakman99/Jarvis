@@ -18,13 +18,16 @@
 ```mermaid
 flowchart TD
     cli[CLI_main] --> app[AgentApp]
+    app --> factory[AgentFactory]
     app --> coordinator[AgentCoordinator]
-    coordinator --> planningAgent[PlanningAgent]
-    coordinator --> orchestrator[AgentOrchestrator]
-    orchestrator --> session[AgentSession]
+    coordinator --> router[AgentRouter]
+    router --> baseAgent[BaseAgent]
+    baseAgent --> planner[PlannerProtocol]
+    baseAgent --> loopExecutor[LoopExecutor]
+    loopExecutor --> session[AgentSession]
     coordinator --> memory[MemoryService]
-    orchestrator --> llm[LLMGateway]
-    orchestrator --> executor[ToolExecutor]
+    loopExecutor --> llm[LLMGateway]
+    loopExecutor --> executor[ToolExecutor]
     executor --> registry[ToolRegistry]
     registry --> builtin[BuiltinTools]
 ```
@@ -47,9 +50,11 @@ flowchart TD
 
 ### 3.3 领域层（Domain）
 
-- **编排核心**：`orchestrator.py` 中 `AgentOrchestrator` 负责单次请求主循环（请求级会话创建 → LLM 调用 → 工具执行与消息回写 → 产出 AgentResponse）；多 Agent 下由 `AgentCoordinator` 统一控制 memory 更新与规划步骤来源。
+- **编排核心**：`coordinator.py` 中 `AgentCoordinator` 负责 memory 更新、agent 路由与会话管理；单 Agent 生命周期由 `BaseAgent` 模板方法驱动。
 - **会话**：`session.py` 中 `AgentSession` 管理 messages（append_user / append_assistant / append_assistant_tool_calls / append_tool_message）。
-- **规划**：由 `coordinator.py` 中 `PlanningAgent` 负责生成步骤列表，不再保留 `Planner`。
+- **规划**：`planner.py` 中 `PlannerProtocol` 抽象规划策略，默认实现 `LLMPlanner` / `NullPlanner`。
+- **执行**：`agent_executor.py` 中 `ExecutorProtocol` 抽象执行策略，默认实现 `LoopExecutor`。
+- **工厂**：`factory.py` 中 `AgentFactory` + `PlannerRegistry` + `ExecutorRegistry` 负责可插拔实例化。
 - **记忆**：`memory.py` 中 `MemoryService` 对外提供 build_system_context、observe_user_input；存储由 `BaseMemoryStore` 抽象，实现包括 File / SQLite。
 - **工具**：`tools/base.py`（ToolSpec / BaseTool / FunctionTool / ToolResult）、`registry.py`（ToolRegistry）、`executor.py`（ToolExecutor）、`context.py`（RequestContext / ToolContext）；builtin 通过 `create_tooling(register_builtin=True)` 在应用装配时注册。
 - **响应**：`response.py` 中 `AgentResponse`（content / steps / metadata）。
@@ -71,33 +76,40 @@ sequenceDiagram
     participant U as User
     participant M as MainCLI
     participant A as AgentApp
+    participant F as AgentFactory
     participant C as Coordinator
-    participant P as PlanningAgent
-    participant O as Orchestrator
+    participant AR as AgentRouter
+    participant G as BaseAgent
+    participant P as PlannerProtocol
+    participant O as LoopExecutor
     participant L as LLMGateway
     participant E as ToolExecutor
-    participant R as ToolRegistry
+    participant TR as ToolRegistry
     participant S as MemoryService
 
     U->>M: 输入文本
     M->>A: chat(user_input)
+    A->>F: create(role_config)
     A->>C: run(user_input)
     C->>S: observe_user_input()
-    C->>P: plan(user_input)
-    P-->>C: steps
-    C->>O: run(user_input)
+    C->>AR: route(user_input, context)
+    C->>G: run(user_input, session)
+    G->>P: plan(user_input)
+    P-->>G: steps
+    G->>O: execute(user_input)
     O->>L: chat(messages, tools_schema)
     L-->>O: assistant 或 tool_calls
     alt 有 tool_calls
         O->>E: execute_tool_call()
-        E->>R: get(tool_name)
-        R-->>E: tool impl
+        E->>TR: get(tool_name)
+        TR-->>E: tool impl
         E-->>O: tool result message
         O->>L: chat(updated_messages, tools_schema)
     end
     L-->>O: final content
-    O-->>C: AgentResponse
-    C-->>A: AgentResponse(with steps)
+    O-->>G: ExecutionResult
+    G-->>C: AgentResponse
+    C-->>A: AgentResponse
     A-->>M: content
     M-->>U: 输出回答
 ```
@@ -117,7 +129,7 @@ sequenceDiagram
 
 - **新增工具**：在 `src/tools/builtin/` 实现并注册，无需改 Orchestrator 主循环。
 - **记忆后端**：实现 `BaseMemoryStore`（如 SQLite/Redis）并注入 MemoryService。
-- **多 Agent**：引入 BaseAgent 与 AgentCoordinator，注册 PlanningAgent / ConversationAgent 等，由 Coordinator 决定调用顺序与工具集。
+- **多 Agent**：引入 BaseAgent + AgentRoleConfig + AgentRouter，新增角色只需配置与注册，无需修改编排引擎。
 - **横切能力**：通过 `RequestContext` 贯通 `request_id/trace_id/deadline`；在 LLMGateway 与 ToolExecutor 统一做重试/超时/审计/指标；CLI 负责最终异常兜底与可读错误提示。
 
 重构组件边界时，请同步更新本文档的分层图、模块职责与数据流。

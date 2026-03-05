@@ -6,8 +6,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.agent.orchestrator import AgentOrchestrator, AgentOrchestratorConfig  # noqa: E402
+from src.agent.planner import LLMPlanner  # noqa: E402
 from src.agent.session import AgentSession  # noqa: E402
-from src.agent.coordinator import PlanningAgent  # noqa: E402
 from src.engine import LLMReply, LLMToolCall  # noqa: E402
 from src.tools.context import RequestContext  # noqa: E402
 from src.tools.executor import ToolExecutor  # noqa: E402
@@ -138,11 +138,11 @@ class _CaptureMessagesEngine:
 
 def test_planning_agent_should_include_full_history():
     engine = _CaptureMessagesEngine()
-    planner = PlanningAgent(engine=engine)
+    planner = LLMPlanner(engine=engine)
     session = AgentSession(system_prompt="你是助手")
     session.append_user("第一个问题")
     session.append_assistant("第一个回答")
-    steps = planner.plan("继续第二个问题", session, context=RequestContext.create())
+    steps = planner.plan("继续第二个问题", session=session, context=RequestContext.create())
 
     assert steps == ["step1", "step2"]
     assert len(engine.last_messages) == 2

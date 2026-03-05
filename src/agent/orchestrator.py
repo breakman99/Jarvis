@@ -1,32 +1,25 @@
 """
-Orchestrator：驱动多轮 LLM + 工具循环，负责单次请求内的执行与工具编排。
-
-不承担规划职责；输入为 user_input、可选的 RequestContext 与 AgentSession，
-通过 engine.chat(messages, tools) 获取模型决策，若有 tool_calls 则经 ToolExecutor
-执行并写回 tool 消息后继续循环，直到返回最终文本或达到最大迭代次数。
+Orchestrator 兼容层：内部委托 LoopExecutor，保留旧调用入口。
 """
 from __future__ import annotations
 
-import logging
-import uuid
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Optional
 
 from ..engine import LLMEngineProtocol
-from ..observability import metrics
 from ..tools import ToolContext, ToolExecutor, ToolRegistry
-from .memory import MemoryService
+from .agent_executor import LoopExecutor, LoopExecutorConfig, to_agent_response
 from .response import AgentResponse
 from .session import AgentSession
-
-logger = logging.getLogger(__name__)
+from .tool_set import ToolSet
 
 DEFAULT_SYSTEM_PROMPT = "你是一个严谨的助手。请善用工具回答问题。"
 
 
 @dataclass
 class AgentOrchestratorConfig:
-    """Orchestrator 运行参数：最大迭代轮数、系统提示词。"""
+    """兼容旧配置结构；执行期参数映射到 LoopExecutorConfig。"""
+
     max_iterations: int = 5
     max_consecutive_tool_failures: int = 3
     enable_session_trim: bool = False
@@ -35,7 +28,7 @@ class AgentOrchestratorConfig:
 
 
 class AgentOrchestrator:
-    """单次请求的 LLM + 工具循环执行器；由 ConversationAgent 委托调用。"""
+    """兼容旧接口的执行器封装。"""
 
     def __init__(
         self,
@@ -44,13 +37,21 @@ class AgentOrchestrator:
         tool_registry: ToolRegistry,
         tool_executor: ToolExecutor,
         config: Optional[AgentOrchestratorConfig] = None,
-        memory_service: Optional[MemoryService] = None,
+        memory_service: object | None = None,
     ):
-        self.engine = engine
-        self.tool_registry = tool_registry
-        self.tool_executor = tool_executor
-        self.config = config or AgentOrchestratorConfig()
-        self.memory_service = memory_service
+        _ = memory_service
+        self._tool_registry = tool_registry
+        self._config = config or AgentOrchestratorConfig()
+        self._executor = LoopExecutor(
+            engine=engine,
+            tool_executor=tool_executor,
+            config=LoopExecutorConfig(
+                max_iterations=self._config.max_iterations,
+                max_consecutive_tool_failures=self._config.max_consecutive_tool_failures,
+                enable_session_trim=self._config.enable_session_trim,
+                max_session_messages=self._config.max_session_messages,
+            ),
+        )
 
     def run(
         self,
@@ -59,149 +60,14 @@ class AgentOrchestrator:
         context: Optional[ToolContext] = None,
         session: Optional[AgentSession] = None,
     ) -> AgentResponse:
-        """
-        执行一轮（或多轮）对话：若未传入 session 则用 memory 构建 system_prompt 并创建新 session；
-        循环调用 engine.chat，无 tool_calls 时返回最终 content，有则执行工具并继续，直到结束或超时/取消/达到 max_iterations。
-        """
-        active_context = context or ToolContext.create(session_id=uuid.uuid4().hex)
-        should_observe_memory = not bool(active_context.extra.get("memory_observed"))
-        if self.memory_service and should_observe_memory:
-            self.memory_service.observe_user_input(user_input)
-        if session is None:
-            prompt = self.config.system_prompt
-            if self.memory_service:
-                memory_hint = self.memory_service.build_system_context()
-                if memory_hint:
-                    prompt = f"{prompt}\n\n已知用户记忆: {memory_hint}"
-            active = AgentSession(system_prompt=prompt)
-        else:
-            active = session
-        active.append_user(user_input)
-        if self.config.enable_session_trim:
-            active.trim(max_messages=self.config.max_session_messages)
-        phase_log: List[str] = []
-        consecutive_tool_failures = 0
-        metrics.inc("orchestrator_runs_total", labels={"mode": "single" if session is None else "shared"})
-
-        for iteration in range(self.config.max_iterations):
-            if active_context.should_stop():
-                return AgentResponse(
-                    content="请求已取消或超时，任务已停止。",
-                    metadata={"reason": "deadline_or_cancelled", "phase_log": phase_log},
-                    steps=[],
-                )
-            logger.debug(
-                "iteration=%s messages_count=%s",
-                iteration + 1,
-                len(active.messages),
-            )
-            response = self.engine.chat(
-                active.messages,
-                tools=self.tool_registry.to_openai_tools(),
-                context=active_context,
-            )
-            if not response.tool_calls:
-                logger.info(
-                    "event=orchestrator_decision iteration=%s decision=final_answer request_id=%s trace_id=%s",
-                    iteration + 1,
-                    active_context.request_id,
-                    active_context.trace_id,
-                )
-                if iteration == 0:
-                    phase_log.extend(["think", "plan", "review"])
-                else:
-                    phase_log.append("review")
-                content = response.content or ""
-                active.append_assistant(content)
-                logger.info("finished_with=success")
-                return AgentResponse(
-                    content=content,
-                    steps=[],
-                    metadata={
-                        "phase_log": phase_log,
-                        "request_id": active_context.request_id,
-                        "trace_id": active_context.trace_id,
-                    },
-                )
-
-            tool_names = [tc.name for tc in response.tool_calls]
-            logger.info(
-                "event=orchestrator_decision iteration=%s decision=use_tools tools=%s request_id=%s trace_id=%s",
-                iteration + 1,
-                tool_names,
-                active_context.request_id,
-                active_context.trace_id,
-            )
-            if iteration == 0:
-                phase_log.extend(["think", "plan", "act"])
-            else:
-                phase_log.append("act")
-            tool_calls_payload = [
-                {
-                    "id": call.id,
-                    "type": "function",
-                    "function": {
-                        "name": call.name,
-                        "arguments": call.arguments,
-                    },
-                }
-                for call in response.tool_calls
-            ]
-            active.append_assistant_tool_calls_data(response.content or "", tool_calls_payload)
-            for tool_call in response.tool_calls:
-                execution = self.tool_executor.execute_tool_call(tool_call, context=active_context)
-                active.append_tool_message(execution.to_tool_message())
-                if execution.result.ok:
-                    consecutive_tool_failures = 0
-                else:
-                    consecutive_tool_failures += 1
-                if self.config.enable_session_trim:
-                    active.trim(max_messages=self.config.max_session_messages)
-                if consecutive_tool_failures >= self.config.max_consecutive_tool_failures:
-                    logger.warning(
-                        "event=orchestrator_stop reason=consecutive_tool_failures count=%s request_id=%s trace_id=%s",
-                        consecutive_tool_failures,
-                        active_context.request_id,
-                        active_context.trace_id,
-                    )
-                    # 业务优化：达到失败阈值后不直接硬中断，先让模型基于已有证据收敛出最终答复。
-                    active.messages.append(
-                        {
-                            "role": "system",
-                            "content": (
-                                "工具已连续失败，停止继续调用工具。"
-                                "请基于当前对话与已获取信息，输出最终结论，"
-                                "并明确失败原因与可执行的替代方案。"
-                            ),
-                        }
-                    )
-                    final_response = self.engine.chat(
-                        active.messages,
-                        tools=None,
-                        context=active_context,
-                    )
-                    final_content = (
-                        final_response.content
-                        or "工具连续失败，且无法生成稳定结论。请稍后重试或更换数据源。"
-                    )
-                    active.append_assistant(final_content)
-                    phase_log.append("review")
-                    return AgentResponse(
-                        content=final_content,
-                        metadata={
-                            "reason": "consecutive_tool_failures_finalized",
-                            "phase_log": phase_log,
-                            "request_id": active_context.request_id,
-                            "trace_id": active_context.trace_id,
-                        },
-                        steps=[],
-                    )
-            metrics.inc("orchestrator_iterations", labels={"status": "continued"})
-
-        logger.info("finished_with=max_iterations")
-        return AgentResponse(
-            content="达到最大任务循环次数, Agent 未能完成任务。",
-            metadata={"reason": "max_iterations_reached", "phase_log": phase_log},
+        active_session = session or AgentSession(system_prompt=self._config.system_prompt)
+        active_session.append_user(user_input)
+        result = self._executor.execute(
+            user_input,
+            tools=ToolSet(self._tool_registry),
+            session=active_session,
+            context=context,
             steps=[],
         )
+        return to_agent_response(result, [])
 

@@ -2,7 +2,7 @@
 Agent 应用壳与装配层。
 
 AgentApp 根据 AgentAppConfig 创建 LLMGateway、ToolRegistry/ToolExecutor、
-MemoryService（可选）以及 AgentCoordinator（含 ConversationAgent 与可选的 PlanningAgent），
+MemoryService（可选）以及 AgentCoordinator（由 AgentFactory 构建可配置 Agent），
 对外提供 chat(user_input) -> str。RequestContext 在此创建并透传至编排层。
 """
 from __future__ import annotations
@@ -15,9 +15,12 @@ from ..config import AGENT_CONFIG, DEFAULT_PROVIDER, validate_settings
 from ..engine import LLMGateway
 from ..tools import create_tooling
 from ..tools.context import RequestContext
-from .coordinator import AgentCoordinator, ConversationAgent, PlanningAgent
+from .coordinator import AgentCoordinator
+from .factory import AgentFactory
 from .memory import FileMemoryStore, MemoryService, SQLiteMemoryStore
-from .orchestrator import AgentOrchestratorConfig
+from .orchestrator import AgentOrchestratorConfig, DEFAULT_SYSTEM_PROMPT
+from .role_config import AgentRoleConfig
+from .router import DefaultRouter
 from .session import AgentSession
 
 logger = logging.getLogger(__name__)
@@ -35,10 +38,12 @@ class AgentAppConfig:
     memory_backend: str = AGENT_CONFIG["memory_backend"]
     memory_file_path: str = AGENT_CONFIG["memory_file_path"]
     memory_db_path: str = AGENT_CONFIG["memory_db_path"]
+    default_agent_name: str = "default"
+    default_system_prompt: str = DEFAULT_SYSTEM_PROMPT
 
 
 class AgentApp:
-    """统一装配入口：Coordinator + ConversationAgent + PlanningAgent。"""
+    """统一装配入口：Coordinator + ConfigurableAgent。"""
 
     def __init__(self, config: AgentAppConfig | None = None):
         validate_settings()
@@ -50,6 +55,7 @@ class AgentApp:
             max_consecutive_tool_failures=self.config.max_consecutive_tool_failures,
             enable_session_trim=self.config.enable_session_trim,
             max_session_messages=self.config.max_session_messages,
+            system_prompt=self.config.default_system_prompt,
         )
         tool_registry, tool_executor = create_tooling(register_builtin=True)
         memory_service = None
@@ -62,21 +68,26 @@ class AgentApp:
                 store=SQLiteMemoryStore(self.config.memory_db_path)
             )
 
-        conv = ConversationAgent(
-            engine=engine,
-            tool_registry=tool_registry,
-            tool_executor=tool_executor,
-            config=orchestrator_config,
-            memory_service=memory_service,
+        planner_type = "llm" if self.config.enable_planning else "null"
+        role_config = AgentRoleConfig(
+            name=self.config.default_agent_name,
+            system_prompt=self.config.default_system_prompt,
+            planner_type=planner_type,
+            executor_type="loop",
+            max_iterations=self.config.max_iterations,
         )
-        planning_agent = PlanningAgent(engine=engine) if self.config.enable_planning else None
-        self.agent = AgentCoordinator(
+        factory = AgentFactory(
             engine=engine,
             tool_registry=tool_registry,
             tool_executor=tool_executor,
-            agents=[conv],
+            orchestrator_config=orchestrator_config,
+        )
+        default_agent = factory.create(role_config)
+        self.agent = AgentCoordinator(
+            agents=[default_agent],
+            router=DefaultRouter(default_agent_name=role_config.name),
             memory_service=memory_service,
-            planning_agent=planning_agent,
+            default_agent_name=role_config.name,
         )
         self._session_id = uuid.uuid4().hex
         self._session: AgentSession | None = None

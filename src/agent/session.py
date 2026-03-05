@@ -68,6 +68,17 @@ class AgentSession:
         """追加一条 role=tool 的消息（工具执行结果）。"""
         self.messages.append(message)
 
+    def refresh_system_prompt(self, system_prompt: str) -> None:
+        """刷新会话中的 system prompt，确保复用 session 时记忆上下文可更新。"""
+        self.system_prompt = system_prompt
+        if not self.messages:
+            self.messages.append({"role": "system", "content": system_prompt})
+            return
+        if self.messages[0].get("role") == "system":
+            self.messages[0]["content"] = system_prompt
+            return
+        self.messages.insert(0, {"role": "system", "content": system_prompt})
+
     def trim(self, *, max_messages: int) -> None:
         """
         裁剪会话消息数量，保留首条 system 消息与末尾若干条消息。

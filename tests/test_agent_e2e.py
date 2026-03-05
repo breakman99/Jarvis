@@ -58,6 +58,21 @@ class FakeLLMCountUserMessages:
         return LLMReply(content=f"user_count={user_count}", tool_calls=[])
 
 
+class FakeLLMCaptureSystemPrompt:
+    """记录每次调用时的 system prompt。"""
+
+    def __init__(self, provider: str = "deepseek") -> None:  # noqa: ARG002
+        self.system_prompts: list[str] = []
+
+    def chat(self, messages, tools=None, context=None):  # noqa: ANN001, ANN201
+        _ = tools, context
+        system_content = ""
+        if messages and messages[0].get("role") == "system":
+            system_content = str(messages[0].get("content", ""))
+        self.system_prompts.append(system_content)
+        return LLMReply(content="ok", tool_calls=[])
+
+
 def test_agent_app_simple_answer(monkeypatch: pytest.MonkeyPatch) -> None:
     """验证 AgentApp 通过 LLM 直接给出答案的完整链路。"""
 
@@ -93,4 +108,27 @@ def test_agent_app_should_keep_session_history(monkeypatch: pytest.MonkeyPatch) 
 
     assert "user_count=1" in first
     assert "user_count=2" in second
+
+
+def test_agent_app_should_refresh_memory_context_on_reused_session(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    fake_llm = FakeLLMCaptureSystemPrompt()
+    monkeypatch.setattr(agent_app_module, "LLMGateway", lambda provider: fake_llm)
+
+    memory_file = tmp_path / "memory.json"
+    app = agent_app_module.AgentApp(
+        AgentAppConfig(
+            enable_planning=False,
+            memory_backend="file",
+            memory_file_path=str(memory_file),
+        )
+    )
+
+    app.chat("你好")
+    app.chat("我叫小明")
+
+    assert len(fake_llm.system_prompts) == 2
+    assert "用户名字是 小明" in fake_llm.system_prompts[1]
 
