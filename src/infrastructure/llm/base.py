@@ -13,7 +13,7 @@ from openai import OpenAI
 from src.infrastructure.common import CancelledError, TimeoutError, TransientError
 from src.infrastructure.config import LLM_CONFIG, get_provider_model_config, load_model_config
 from src.infrastructure.observability import metrics
-from src.domain.tools.runtime.context import RequestContext
+from src.domain.common.request_context import RequestContext
 from .types import LLMReply, LLMToolCall
 
 logger = logging.getLogger(__name__)

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from src.domain.tools.runtime.context import ToolContext
+from src.domain.common.request_context import ToolContext
 from ..memory.service import MemoryService
 from ..models.response import AgentResponse
 from ..models.session import AgentSession

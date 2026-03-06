@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol
 
-from src.infrastructure.observability import emit_audit_event
+from src.domain.common.observability import emit_audit_event
 
 logger = logging.getLogger(__name__)
 

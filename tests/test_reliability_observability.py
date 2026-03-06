@@ -12,10 +12,15 @@ from src.domain.agent.runtime.orchestrator import AgentOrchestrator, AgentOrches
 from src.domain.tools.catalog.builtin import AddNumbersTool, HttpGetTool, HttpPostJsonTool  # noqa: E402
 import src.domain.tools.catalog.builtin.common as builtin_common  # noqa: E402
 from src.domain.tools.catalog.builtin.common import validate_http_url_safety  # noqa: E402
+from src.domain.tools.bootstrap.factory import create_tooling  # noqa: E402
 from src.domain.tools.spec.base import BaseTool, ToolResult, ToolSpec  # noqa: E402
 from src.infrastructure.llm import LLMReply, LLMToolCall  # noqa: E402
+from src.domain.ports import LLMToolCall as DomainLLMToolCall  # noqa: E402
+from src.infrastructure.common import TimeoutError as InfraTimeoutError  # noqa: E402
+from src.domain.common import TimeoutError as DomainTimeoutError  # noqa: E402
 from src.domain.tools.registry import ToolRegistry  # noqa: E402
-from src.domain.tools.runtime.context import RequestContext  # noqa: E402
+from src.domain.common.request_context import RequestContext  # noqa: E402
+from src.domain.tools.runtime.context import RequestContext as LegacyRequestContext  # noqa: E402
 from src.domain.tools.runtime.executor import ToolExecutor  # noqa: E402
 
 
@@ -109,6 +114,18 @@ def test_tool_executor_invalid_tool_args_should_not_crash():
     assert "参数解析失败" in (result.result.error or "")
 
 
+def test_legacy_request_context_import_should_remain_compatible():
+    assert LegacyRequestContext is RequestContext
+
+
+def test_legacy_llm_type_import_should_remain_compatible():
+    assert LLMToolCall is DomainLLMToolCall
+
+
+def test_legacy_error_import_should_remain_compatible():
+    assert InfraTimeoutError is DomainTimeoutError
+
+
 def test_tool_executor_retry_only_for_idempotent_tool():
     registry = ToolRegistry()
     idem_tool = _FailOnceTool()
@@ -168,6 +185,22 @@ def test_http_tool_should_block_private_network_url():
 
     assert blocked_exec.result.ok is False
     assert "禁止访问本地或内网地址" in (blocked_exec.result.error or "")
+
+
+def test_create_tooling_should_pass_http_host_rules_to_builtin_tools():
+    _, executor = create_tooling(
+        register_defaults=True,
+        max_retries=1,
+        http_allow_hosts=("api.example.com",),
+        http_deny_hosts=(),
+    )
+    result = executor.execute(
+        "http_get",
+        {"url": "https://www.example.com/data"},
+        context=RequestContext.create(),
+    )
+    assert result.result.ok is False
+    assert "目标主机不在允许名单中" in (result.result.error or "")
 
 
 class _RedirectResponse:

@@ -4,8 +4,8 @@ import json
 import logging
 from typing import Any, List, Protocol
 
-from src.domain.tools.runtime.context import ToolContext
-from src.infrastructure.llm import LLMEngineProtocol
+from src.domain.common.request_context import ToolContext
+from src.domain.ports import LLMEngineProtocol
 from ..models.session import AgentSession
 
 logger = logging.getLogger(__name__)

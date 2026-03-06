@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from typing import Optional
 
 from src.domain.tools.registry.registry import ToolRegistry
-from src.domain.tools.runtime.context import ToolContext
+from src.domain.common.request_context import ToolContext
 from src.domain.tools.runtime.executor import ToolExecutor
-from src.infrastructure.llm import LLMEngineProtocol
+from src.domain.ports import LLMEngineProtocol
 from ..execution.loop_executor import LoopExecutor, LoopExecutorConfig, to_agent_response
 from ..models.response import AgentResponse
 from ..models.session import AgentSession

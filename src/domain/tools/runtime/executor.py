@@ -12,19 +12,14 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from src.infrastructure.common import CancelledError, TimeoutError
-from src.infrastructure.llm.types import LLMToolCall
-from src.infrastructure.observability import emit_audit_event, metrics
+from src.domain.common.errors import CancelledError, TimeoutError
+from src.domain.common.observability import emit_audit_event, metrics
+from src.domain.ports import LLMToolCall
 from ..registry.registry import ToolRegistry
 from ..spec.base import ToolResult
-from .context import RequestContext, ToolContext
+from src.domain.common.request_context import RequestContext, ToolContext
 
 logger = logging.getLogger(__name__)
-
-try:
-    from src.infrastructure.config import TOOL_CONFIG
-except ImportError:
-    TOOL_CONFIG = {"max_retries": 2}
 
 _SENSITIVE_KEYWORDS = (
     "authorization",
@@ -158,9 +153,9 @@ class ToolExecution:
 
 class ToolExecutor:
     """统一执行工具调用：get 工具、执行、捕获异常为 ToolResult；可选重试与 context 超时/取消。"""
-    def __init__(self, registry: ToolRegistry):
+    def __init__(self, registry: ToolRegistry, *, max_retries: int = 2):
         self.registry = registry
-        self._max_retries = TOOL_CONFIG.get("max_retries", 2)
+        self._max_retries = max(0, int(max_retries))
 
     def execute(
         self,

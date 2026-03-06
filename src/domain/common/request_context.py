@@ -1,0 +1,74 @@
+"""
+RequestContext：领域共享的请求级上下文。
+
+设计意图：
+- 该对象属于跨业务流程的共享语义，不属于 tools 子域。
+- 在 App/Agent/LLM/Tool 全链路透传 request_id、trace_id、deadline 等控制信息。
+"""
+
+from __future__ import annotations
+
+import time
+import uuid
+from dataclasses import dataclass, field
+from typing import Any, Dict, Optional
+
+
+@dataclass
+class RequestContext:
+    """请求级上下文；extra 用于透传链路内的控制标记。"""
+
+    request_id: str
+    trace_id: str
+    session_id: Optional[str] = None
+    user_id: Optional[str] = None
+    deadline_ts: Optional[float] = None
+    cancelled: bool = False
+    extra: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        session_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        timeout_seconds: Optional[float] = None,
+    ) -> "RequestContext":
+        now = time.time()
+        request_id = uuid.uuid4().hex
+        trace_id = uuid.uuid4().hex
+        deadline_ts = None
+        if timeout_seconds is not None and timeout_seconds > 0:
+            deadline_ts = now + timeout_seconds
+        return cls(
+            request_id=request_id,
+            trace_id=trace_id,
+            session_id=session_id,
+            user_id=user_id,
+            deadline_ts=deadline_ts,
+        )
+
+    def is_expired(self) -> bool:
+        return self.deadline_ts is not None and time.time() >= self.deadline_ts
+
+    def time_left_seconds(self) -> Optional[float]:
+        """返回距截止时间剩余秒数；未设置 deadline 返回 None。"""
+        if self.deadline_ts is None:
+            return None
+        return max(0.0, self.deadline_ts - time.time())
+
+    def should_stop(self) -> bool:
+        return self.cancelled or self.is_expired()
+
+    def to_log_fields(self) -> Dict[str, Any]:
+        return {
+            "request_id": self.request_id,
+            "trace_id": self.trace_id,
+            "session_id": self.session_id or "",
+            "user_id": self.user_id or "",
+        }
+
+
+# Backward-compatible alias kept for existing code semantics.
+ToolContext = RequestContext
+

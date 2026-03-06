@@ -4,7 +4,7 @@ from typing import Callable
 
 from src.domain.tools.registry.registry import ToolRegistry
 from src.domain.tools.runtime.executor import ToolExecutor
-from src.infrastructure.llm import LLMEngineProtocol
+from src.domain.ports import LLMEngineProtocol
 from ..config.role import AgentRoleConfig
 from ..execution.loop_executor import LoopExecutor, LoopExecutorConfig
 from ..planning.planner import DEFAULT_PLANNER_PROMPT, LLMPlanner, NullPlanner, PlannerProtocol

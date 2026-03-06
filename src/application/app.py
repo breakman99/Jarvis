@@ -26,10 +26,11 @@ from src.domain.agent import (
     SQLiteMemoryStore,
 )
 from src.domain.tools.bootstrap.factory import create_tooling
-from src.domain.tools.runtime.context import RequestContext
+from src.domain.common.request_context import RequestContext
 from src.infrastructure.config import (
     AGENT_CONFIG,
     DEFAULT_PROVIDER,
+    TOOL_CONFIG,
     validate_settings,
 )
 from src.infrastructure.llm import LLMGateway
@@ -106,7 +107,12 @@ class AgentApp:
             max_session_messages=self.config.max_session_messages,
             system_prompt=self.config.default_system_prompt,
         )
-        tool_registry, tool_executor = create_tooling(register_defaults=True)
+        tool_registry, tool_executor = create_tooling(
+            register_defaults=True,
+            max_retries=int(TOOL_CONFIG.get("max_retries", 2)),
+            http_allow_hosts=TOOL_CONFIG.get("http_allow_hosts"),
+            http_deny_hosts=TOOL_CONFIG.get("http_deny_hosts"),
+        )
         memory_service = None
         if self.config.memory_backend == "file":
             memory_service = MemoryService(

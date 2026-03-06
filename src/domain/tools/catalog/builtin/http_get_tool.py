@@ -11,16 +11,13 @@ from .common import (
     validate_http_url_safety,
 )
 
-try:
-    from src.infrastructure.config import TOOL_CONFIG
-except ImportError:
-    TOOL_CONFIG = {}
-
 
 class HttpGetTool(BaseTool):
     """HTTP GET 请求，返回响应正文（截断）。"""
 
-    def __init__(self) -> None:
+    def __init__(self, *, allow_hosts: Any = None, deny_hosts: Any = None) -> None:
+        self._allow_hosts = allow_hosts
+        self._deny_hosts = deny_hosts
         super().__init__(
             ToolSpec(
                 name="http_get",
@@ -53,8 +50,8 @@ class HttpGetTool(BaseTool):
         url = args.get("url") or ""
         url_error = validate_http_url_safety(
             url,
-            allow_hosts=TOOL_CONFIG.get("http_allow_hosts"),
-            deny_hosts=TOOL_CONFIG.get("http_deny_hosts"),
+            allow_hosts=self._allow_hosts,
+            deny_hosts=self._deny_hosts,
         )
         if url_error:
             return ToolResult(ok=False, content="", error=url_error)
@@ -70,8 +67,8 @@ class HttpGetTool(BaseTool):
             redirect_error = describe_blocked_redirect(
                 response,
                 url,
-                allow_hosts=TOOL_CONFIG.get("http_allow_hosts"),
-                deny_hosts=TOOL_CONFIG.get("http_deny_hosts"),
+                allow_hosts=self._allow_hosts,
+                deny_hosts=self._deny_hosts,
             )
             if redirect_error:
                 return ToolResult(ok=False, content="", error=redirect_error)

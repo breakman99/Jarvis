@@ -4,10 +4,10 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from src.domain.tools.runtime.context import ToolContext
+from src.domain.common.request_context import ToolContext
+from src.domain.common.observability import metrics
+from src.domain.ports import LLMEngineProtocol
 from src.domain.tools.runtime.executor import ToolExecutor
-from src.infrastructure.llm import LLMEngineProtocol
-from src.infrastructure.observability import metrics
 from ..models.response import AgentResponse
 from ..models.session import AgentSession
 from ..runtime.tool_set import ToolSet
