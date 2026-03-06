@@ -81,12 +81,22 @@ class FileMemoryStore(BaseMemoryStore):
     def load(self) -> Dict[str, Any]:
         if not self.file_path.exists():
             return {}
-        with self.file_path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
+        try:
+            with self.file_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning(
+                "memory_file_load_failed path=%s error=%s",
+                self.file_path,
+                exc,
+            )
+            return {}
         return self._normalize(data)
 
-    def _normalize(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize(self, data: Dict[str, Any] | Any) -> Dict[str, Any]:
         """将旧版扁平结构迁移为 {profile: {key: value}}。"""
+        if not isinstance(data, dict):
+            return {}
         if not data:
             return {}
         if PROFILE_NAMESPACE in data and isinstance(data[PROFILE_NAMESPACE], dict):

@@ -4,6 +4,7 @@ from typing import Any
 
 from ...spec.base import BaseTool, ToolResult, ToolSpec
 from .common import (
+    describe_blocked_redirect,
     ensure_requests,
     normalize_response_text,
     resolve_timeout,
@@ -64,7 +65,21 @@ class HttpPostJsonTool(BaseTool):
         headers = args.get("headers") or {}
         timeout = resolve_timeout(args.get("timeout"), context, default_timeout=15.0)
         try:
-            response = requests.post(url, json=json_body, headers=headers, timeout=timeout)
+            response = requests.post(
+                url,
+                json=json_body,
+                headers=headers,
+                timeout=timeout,
+                allow_redirects=False,
+            )
+            redirect_error = describe_blocked_redirect(
+                response,
+                url,
+                allow_hosts=TOOL_CONFIG.get("http_allow_hosts"),
+                deny_hosts=TOOL_CONFIG.get("http_deny_hosts"),
+            )
+            if redirect_error:
+                return ToolResult(ok=False, content="", error=redirect_error)
             response.raise_for_status()
             return ToolResult(ok=True, content=normalize_response_text(response))
         except Exception as exc:

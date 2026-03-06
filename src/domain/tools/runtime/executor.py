@@ -48,6 +48,15 @@ def _tool_error_retryable(exc: BaseException) -> bool:
     return False
 
 
+def _tool_result_retryable(result: ToolResult) -> bool:
+    if result.ok:
+        return False
+    error_text = str(result.error or "").strip()
+    if not error_text:
+        return False
+    return _tool_error_retryable(RuntimeError(error_text))
+
+
 def _is_sensitive_key(key: Any) -> bool:
     key_s = str(key).lower()
     return any(token in key_s for token in _SENSITIVE_KEYWORDS)
@@ -230,6 +239,17 @@ class ToolExecutor:
                         context.request_id if context else "",
                         context.trace_id if context else "",
                     )
+                    if (
+                        tool.spec.idempotent
+                        and attempt < max_attempts - 1
+                        and _tool_result_retryable(result)
+                    ):
+                        metrics.inc(
+                            "retry_total",
+                            labels={"layer": "tool", "reason": "tool_result_retryable"},
+                        )
+                        time.sleep(0.5 * (attempt + 1))
+                        continue
                 emit_audit_event(
                     "tool_execution",
                     actor="ToolExecutor",

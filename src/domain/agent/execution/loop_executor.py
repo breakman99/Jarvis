@@ -83,6 +83,8 @@ class LoopExecutor:
                         "reason": "deadline_or_cancelled",
                         "phase_log": phase_log,
                         "tool_traces": tool_traces,
+                        "request_id": active_context.request_id,
+                        "trace_id": active_context.trace_id,
                     },
                 )
             response = self._engine.chat(
@@ -184,6 +186,8 @@ class LoopExecutor:
                 "reason": "max_iterations_reached",
                 "phase_log": phase_log,
                 "tool_traces": tool_traces,
+                "request_id": active_context.request_id,
+                "trace_id": active_context.trace_id,
             },
         )
 

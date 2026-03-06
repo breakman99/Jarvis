@@ -77,6 +77,13 @@ class TestFileMemoryStore(unittest.TestCase):
             store.save(data)
             self.assertEqual(store.load(), data)
 
+    def test_load_invalid_json_should_return_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "broken.json"
+            path.write_text("{bad json", encoding="utf-8")
+            store = FileMemoryStore(str(path))
+            self.assertEqual(store.load(), {})
+
 
 class TestSQLiteMemoryStore(unittest.TestCase):
     def test_save_and_load(self) -> None:

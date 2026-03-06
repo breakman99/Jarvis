@@ -4,7 +4,7 @@ import json
 import ipaddress
 import socket
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 try:
     import requests
@@ -134,3 +134,31 @@ def truncate_text(text: str, max_chars: int = MAX_RESPONSE_CHARS) -> str:
     if len(text) <= max_chars:
         return text
     return text[:max_chars] + f"\n\n[内容已截断，共 {len(text)} 字符，仅保留前 {max_chars} 字符]"
+
+
+def describe_blocked_redirect(
+    response: Any,
+    request_url: str,
+    *,
+    allow_hosts: Any = None,
+    deny_hosts: Any = None,
+) -> str | None:
+    """
+    当 HTTP 响应为重定向时，给出安全阻断原因。
+    返回 None 表示非重定向；否则返回错误文本。
+    """
+    status_code = int(getattr(response, "status_code", 0) or 0)
+    if status_code < 300 or status_code >= 400:
+        return None
+    location = str((response.headers or {}).get("Location") or "").strip()
+    if not location:
+        return "请求返回重定向但缺少 Location，已阻止自动跳转"
+    redirect_url = urljoin(request_url, location)
+    safety_error = validate_http_url_safety(
+        redirect_url,
+        allow_hosts=allow_hosts,
+        deny_hosts=deny_hosts,
+    )
+    if safety_error:
+        return f"重定向目标不安全: {safety_error}"
+    return f"请求被重定向到 {redirect_url}，出于安全原因默认不自动跟随重定向"

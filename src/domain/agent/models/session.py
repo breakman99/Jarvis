@@ -82,9 +82,55 @@ class AgentSession:
     def trim(self, *, max_messages: int) -> None:
         """
         裁剪会话消息数量，保留首条 system 消息与末尾若干条消息。
+
+        额外约束：
+        - 不保留“孤立”的 tool 消息（必须有同一裁剪窗口内的 assistant.tool_calls 对应）。
+        - 不保留“未闭合”的 assistant.tool_calls（其后必须包含对应 tool 回包）。
         """
         if max_messages <= 1 or len(self.messages) <= max_messages:
             return
         system = self.messages[0]
+        tail = self.messages[1:]
         tail_keep = max_messages - 1
-        self.messages = [system] + self.messages[-tail_keep:]
+        start_min = max(0, len(tail) - tail_keep)
+        selected = tail[start_min:]
+        if not self._is_tool_sequence_well_formed(selected):
+            for idx in range(start_min + 1, len(tail) + 1):
+                candidate = tail[idx:]
+                if self._is_tool_sequence_well_formed(candidate):
+                    selected = candidate
+                    break
+            else:
+                selected = []
+        self.messages = [system] + selected
+
+    @staticmethod
+    def _is_tool_sequence_well_formed(messages: List[Message]) -> bool:
+        """
+        校验消息切片中的工具调用关系是否闭合：
+        assistant(tool_calls) 必须在后续收到全部 tool 回包，且不得出现孤立 tool。
+        """
+        pending_tool_call_ids: set[str] = set()
+        for message in messages:
+            role = str(message.get("role") or "")
+            if role == "assistant":
+                if pending_tool_call_ids:
+                    return False
+                raw_calls = message.get("tool_calls") or []
+                if isinstance(raw_calls, list):
+                    for call in raw_calls:
+                        if not isinstance(call, dict):
+                            continue
+                        call_id = str(call.get("id") or "")
+                        if call_id:
+                            pending_tool_call_ids.add(call_id)
+                continue
+            if role == "tool":
+                tool_call_id = str(message.get("tool_call_id") or "")
+                if not tool_call_id or tool_call_id not in pending_tool_call_ids:
+                    return False
+                pending_tool_call_ids.remove(tool_call_id)
+                continue
+            if pending_tool_call_ids:
+                return False
+        return not pending_tool_call_ids
